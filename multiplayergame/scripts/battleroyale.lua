@@ -17,6 +17,7 @@ battleRoyale.random = love.math.newRandomGenerator()
 battleRoyale.gameTime = 0
 battleRoyale.nextMeteoroidTime = 0
 battleRoyale.meteoroidSpawnPoints = {}
+battleRoyale.musicAsteroidSpawnPoints = {} -- Pre-calculated music asteroid spawns
 battleRoyale.safeZoneTargets = {}
 
 -- Game settings 
@@ -32,26 +33,31 @@ battleRoyale.max_shrink_padding_y = 200
 -- Use safe timer calculation with fallback for party mode
 local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
 battleRoyale.timer = beatInterval * 20 -- 40 seconds
-battleRoyale.safe_zone_radius = 450
+battleRoyale.safe_zone_radius = 250 -- Start at max radius
 battleRoyale.center_x = 400
 battleRoyale.center_y = 300
 battleRoyale.death_timer = 0
 battleRoyale.death_shake = 0
 battleRoyale.player_dropped = false
 battleRoyale.death_animation_done = false
-battleRoyale.shrink_duration = 20 -- 20 seconds of shrinking (faster)
-battleRoyale.shrink_start_time = 0 -- When shrinking actually starts
-battleRoyale.safe_zone_move_speed = 60 -- pixels per second (faster movement)
+
+-- Random grow/shrink system
+battleRoyale.min_radius = 120
+battleRoyale.max_radius = 250
+battleRoyale.shrink_chance = 1.0 -- Always shrink, never grow
+battleRoyale.size_change_timer = 0
+battleRoyale.size_change_interval = 1.5 -- Change every 1.5 seconds
+battleRoyale.current_change_rate = 0 -- Current radius change rate
+battleRoyale.change_duration = 0 -- How long current change lasts
+
+battleRoyale.safe_zone_move_speed = 40 -- pixels per second (slower than player)
 battleRoyale.safe_zone_move_timer = 0
 battleRoyale.safe_zone_target_x = 400
 battleRoyale.safe_zone_target_y = 300
 battleRoyale.sync_timer = 0
-battleRoyale.sync_interval = 1.0 -- Send sync every 1 second
+battleRoyale.sync_interval = 1/60 -- Send sync every 1/60 seconds (60 times per second)
 battleRoyale.respawn_timer = 0 -- Timer for respawn mechanism
 battleRoyale.respawn_delay = 3 -- 3 seconds before respawn
-battleRoyale.grow_timer = 0 -- Timer for random growth periods
-battleRoyale.grow_duration = 0 -- Current growth duration (0 = not growing)
-battleRoyale.is_growing = false -- Whether currently in growth phase
 
 -- Player settings
 battleRoyale.player = {
@@ -72,11 +78,62 @@ battleRoyale.player = {
 battleRoyale.keysPressed = {}
 battleRoyale.safe_zone_alpha = 0.3
 battleRoyale.asteroids = {}
+battleRoyale.music_asteroids = {} -- New music-synced asteroids
 battleRoyale.asteroid_spawn_timer = 0
 battleRoyale.asteroid_spawn_interval = 1.0 -- More frequent asteroid spawning
 battleRoyale.asteroid_speed = 600 -- Pixels per second (much faster)
+battleRoyale.music_asteroid_spawn_timer = 0
+battleRoyale.music_asteroid_spawn_interval = 2.0 -- Less frequent music asteroids
 battleRoyale.stars = {} -- Moving starfield background
 battleRoyale.star_direction = 0 -- Global direction for all stars
+
+-- Music-synced safety ring system
+battleRoyale.safety_ring_colors = {
+    {0.3, 0.6, 1.0}, -- Blue (default)
+    {1.0, 0.3, 0.3}, -- Red
+    {0.3, 1.0, 0.3}, -- Green
+    {1.0, 1.0, 0.3}, -- Yellow
+    {1.0, 0.3, 1.0}, -- Magenta
+    {0.3, 1.0, 1.0}, -- Cyan
+    {1.0, 0.6, 0.3}, -- Orange
+    {0.6, 0.3, 1.0}  -- Purple
+}
+battleRoyale.current_color_index = 1
+battleRoyale.safety_ring_directions = {
+    {1, 0},   -- Right
+    {1, 1},   -- Down-Right
+    {0, 1},   -- Down
+    {-1, 1},  -- Down-Left
+    {-1, 0},  -- Left
+    {-1, -1}, -- Up-Left
+    {0, -1},  -- Up
+    {1, -1}   -- Up-Right
+}
+battleRoyale.current_direction_index = 1
+battleRoyale.safe_zone_direction = {1, 0} -- Current movement direction
+battleRoyale.beat_count = 0 -- Track beats for synchronization
+
+-- Music asteroid color system
+battleRoyale.music_asteroid_colors = {
+    {0.8, 0.3, 0.8}, -- Purple
+    {1.0, 0.5, 0.0}, -- Orange
+    {0.0, 0.8, 1.0}, -- Cyan
+    {1.0, 0.0, 0.5}, -- Pink
+    {0.5, 1.0, 0.0}, -- Lime
+    {1.0, 1.0, 0.0}, -- Yellow
+    {0.0, 1.0, 0.5}, -- Teal
+    {1.0, 0.3, 0.0}  -- Red-Orange
+}
+battleRoyale.music_asteroid_color_index = 1
+
+-- Interpolation variables for smooth sync
+battleRoyale.last_sync_time = 0
+battleRoyale.target_center_x = 400
+battleRoyale.target_center_y = 300
+battleRoyale.target_radius = 250
+battleRoyale.sync_interpolation_speed = 60.0 -- How fast to interpolate to target (matches 60Hz sync)
+battleRoyale.radius_interpolation_speed = 120.0 -- Faster interpolation for radius changes
+battleRoyale.last_radius = 250 -- Track last radius for smooth transitions
 
 function battleRoyale.load()
     debugConsole.addMessage("[BattleRoyale] Loading battle royale game")
@@ -90,10 +147,10 @@ function battleRoyale.load()
     battleRoyale.death_animation_done = false
     battleRoyale.game_started = false
     battleRoyale.start_timer = 3
-    battleRoyale.shrink_start_time = 0
-    battleRoyale.shrink_padding_x = 0
-    battleRoyale.shrink_padding_y = 0
-    battleRoyale.safe_zone_radius = 450
+    battleRoyale.safe_zone_radius = 250 -- Start at max radius
+    battleRoyale.size_change_timer = 0
+    battleRoyale.current_change_rate = 0
+    battleRoyale.change_duration = 0
     battleRoyale.player.drop_cooldown = 0
     battleRoyale.player.dropping = false
     battleRoyale.player.jump_count = 0
@@ -121,6 +178,21 @@ function battleRoyale.load()
         phase = 0,
         snapDuration = 0.1
     })
+    
+    -- Add dancing effects for music-synced asteroids (like platforms in jump game)
+    musicHandler.addEffect("music_asteroids", "combo", {
+        scaleAmount = 0.15,        -- Scale up to 15% bigger on beat
+        rotateAmount = math.pi/8,  -- Rotate 22.5 degrees on beat
+        frequency = 1,             -- Once per beat
+        phase = 0,
+        snapDuration = 0.15        -- Quick snap effect
+    })
+    
+    musicHandler.addEffect("asteroid_pulse", "beatPulse", {
+        baseColor = {0.5, 0.5, 0.5}, -- Gray base color
+        intensity = 0.4,
+        duration = 0.15
+    })
 
     -- Reset player
     battleRoyale.player = {
@@ -135,20 +207,29 @@ function battleRoyale.load()
         invincibility_timer = 0
     }
     
-    -- Reset respawn timer and growth timers
+    -- Reset respawn timer
     battleRoyale.respawn_timer = 0
-    battleRoyale.grow_timer = 0
-    battleRoyale.grow_duration = 0
-    battleRoyale.is_growing = false
+    
+    -- Reset music-synced variables
+    battleRoyale.current_color_index = 1
+    battleRoyale.current_direction_index = 1
+    battleRoyale.safe_zone_direction = {1, 0}
+    battleRoyale.beat_count = 0
+    battleRoyale.music_asteroid_color_index = 1
+    battleRoyale.last_sync_time = 0
+    battleRoyale.target_center_x = battleRoyale.screen_width / 2
+    battleRoyale.target_center_y = battleRoyale.screen_height / 2
+    battleRoyale.target_radius = 250
+    battleRoyale.last_radius = 250
     
     -- In party mode, ensure player starts in center of safe zone
     debugConsole.addMessage("[BattleRoyale] Checking party mode: " .. tostring(_G and _G.partyMode or "nil") .. " (type: " .. type(_G and _G.partyMode) .. ")")
     if _G and _G.partyMode == true then
-        battleRoyale.player.x = 400
-        battleRoyale.player.y = 300
-        battleRoyale.center_x = 400
-        battleRoyale.center_y = 300
-        battleRoyale.safe_zone_radius = 450
+        battleRoyale.player.x = battleRoyale.screen_width / 2
+        battleRoyale.player.y = battleRoyale.screen_height / 2
+        battleRoyale.center_x = battleRoyale.screen_width / 2
+        battleRoyale.center_y = battleRoyale.screen_height / 2
+        battleRoyale.safe_zone_radius = 250 -- Start at max radius
         
         -- Debug music handler state
         debugConsole.addMessage("[PartyMode] Player positioned in center of safe zone")
@@ -158,10 +239,10 @@ function battleRoyale.load()
     
     -- No spacebar functionality needed without power-ups
 
-    -- Reset safe zone to center
-    battleRoyale.center_x = 400
-    battleRoyale.center_y = 300
-    battleRoyale.safe_zone_radius = 450
+    -- Reset safe zone to center of screen
+    battleRoyale.center_x = battleRoyale.screen_width / 2  -- 400
+    battleRoyale.center_y = battleRoyale.screen_height / 2 -- 300
+    battleRoyale.safe_zone_radius = 250 -- Start at max radius
     
     -- Set star direction for this round
     battleRoyale.star_direction = math.random(0, 2 * math.pi)
@@ -169,9 +250,51 @@ function battleRoyale.load()
     -- Create game elements
     battleRoyale.createStars()
     battleRoyale.asteroids = {}
+    battleRoyale.music_asteroids = {}
     battleRoyale.asteroid_spawn_timer = 0
+    battleRoyale.music_asteroid_spawn_timer = 0
+
+    -- Override music handler onBeat function for Battle Royale
+    musicHandler.onBeat = battleRoyale.handleBeat
 
     debugConsole.addMessage("[BattleRoyale] Game loaded")
+end
+
+-- Handle beat events for music synchronization
+function battleRoyale.handleBeat()
+    if not battleRoyale.game_started then return end
+    
+    battleRoyale.beat_count = battleRoyale.beat_count + 1
+    
+    -- Change safety ring border color every beat
+    battleRoyale.current_color_index = battleRoyale.current_color_index + 1
+    if battleRoyale.current_color_index > #battleRoyale.safety_ring_colors then
+        battleRoyale.current_color_index = 1
+    end
+    
+    -- Change direction every beat for faster movement
+    battleRoyale.current_direction_index = battleRoyale.current_direction_index + 1
+    if battleRoyale.current_direction_index > #battleRoyale.safety_ring_directions then
+        battleRoyale.current_direction_index = 1
+    end
+    
+    -- Update safe zone movement direction
+    battleRoyale.safe_zone_direction = battleRoyale.safety_ring_directions[battleRoyale.current_direction_index]
+    
+    -- Change music asteroid colors every beat
+    battleRoyale.music_asteroid_color_index = battleRoyale.music_asteroid_color_index + 1
+    if battleRoyale.music_asteroid_color_index > #battleRoyale.music_asteroid_colors then
+        battleRoyale.music_asteroid_color_index = 1
+    end
+    
+    -- Calculate current speed multiplier for debug
+    local base_speed = battleRoyale.safe_zone_move_speed
+    local raw_multiplier = 1.0 + (battleRoyale.beat_count * 0.05)
+    local max_multiplier = battleRoyale.player.speed / base_speed
+    local actual_multiplier = math.min(raw_multiplier, max_multiplier)
+    
+    debugConsole.addMessage(string.format("[BattleRoyale] Beat %d - Border Color: %d, Direction: %d, Speed: %.1fx (capped at %.1fx)", 
+        battleRoyale.beat_count, battleRoyale.current_color_index, battleRoyale.current_direction_index, actual_multiplier, max_multiplier))
 end
 
 function battleRoyale.setSeed(seed)
@@ -180,6 +303,7 @@ function battleRoyale.setSeed(seed)
     battleRoyale.gameTime = 0
     battleRoyale.nextMeteoroidTime = 0
     battleRoyale.meteoroidSpawnPoints = {}
+    battleRoyale.musicAsteroidSpawnPoints = {}
     battleRoyale.safeZoneTargets = {}
     
     -- Pre-calculate meteoroid spawn points (like laser game)
@@ -199,6 +323,21 @@ function battleRoyale.setSeed(seed)
     
     -- No power-ups in this version
     
+    -- Pre-calculate music asteroid spawn points
+    time = 0
+    while time < battleRoyale.timer do
+        local musicSpawnInfo = {
+            time = time,
+            side = battleRoyale.random:random(1, 4), -- 1=top, 2=right, 3=bottom, 4=left
+            speed = battleRoyale.random:random(300, 500), -- Slower than regular asteroids
+            size = battleRoyale.random:random(30, 50) -- Larger than regular asteroids
+        }
+        table.insert(battleRoyale.musicAsteroidSpawnPoints, musicSpawnInfo)
+        
+        -- Spawn music asteroids less frequently (every 2-4 seconds)
+        time = time + battleRoyale.random:random(2.0, 4.0)
+    end
+    
     -- Pre-calculate safe zone target positions
     time = 0
     while time < battleRoyale.timer do
@@ -215,8 +354,9 @@ function battleRoyale.setSeed(seed)
     end
     
     debugConsole.addMessage(string.format(
-        "[BattleRoyale] Generated %d meteoroid and %d safe zone targets with seed %d",
+        "[BattleRoyale] Generated %d meteoroid, %d music asteroids, and %d safe zone targets with seed %d",
         #battleRoyale.meteoroidSpawnPoints,
+        #battleRoyale.musicAsteroidSpawnPoints,
         #battleRoyale.safeZoneTargets,
         seed
     ))
@@ -234,11 +374,11 @@ function battleRoyale.update(dt)
         
         -- In party mode, give extra time for players to get into safe zone
         if _G and _G.partyMode == true and battleRoyale.game_started then
-            -- Reset safe zone to full size when game starts in party mode
-            battleRoyale.safe_zone_radius = 450
-            battleRoyale.center_x = 400
-            battleRoyale.center_y = 300
-            debugConsole.addMessage("[PartyMode] Game started - reset safe zone to full size")
+            -- Reset safe zone to max size when game starts in party mode
+            battleRoyale.safe_zone_radius = 250
+            battleRoyale.center_x = battleRoyale.screen_width / 2
+            battleRoyale.center_y = battleRoyale.screen_height / 2
+            debugConsole.addMessage("[PartyMode] Game started - reset safe zone to max size")
             
             -- No elimination system - players respawn instead of being eliminated
         end
@@ -273,107 +413,88 @@ function battleRoyale.update(dt)
     
     -- Party mode uses same safe zone logic as standalone (no music handler dependency)
     
-    -- Move safe zone towards target
-    local dx = battleRoyale.safe_zone_target_x - battleRoyale.center_x
-    local dy = battleRoyale.safe_zone_target_y - battleRoyale.center_y
-    local distance = math.sqrt(dx*dx + dy*dy)
-    if distance > 5 then
-        local move_x = (dx / distance) * battleRoyale.safe_zone_move_speed * dt
-        local move_y = (dy / distance) * battleRoyale.safe_zone_move_speed * dt
+    -- Move safe zone - use interpolation for clients, direct movement for host
+    if _G and _G.returnState == "hosting" then
+        -- Host: direct movement using music-synced direction
+        local base_speed = battleRoyale.safe_zone_move_speed
+        local beat_speed_multiplier = 1.0 + (battleRoyale.beat_count * 0.05) -- Slower speed increase
+        -- Cap speed multiplier to ensure safe zone never moves faster than player (250 pixels/sec)
+        local max_multiplier = battleRoyale.player.speed / base_speed -- 250/40 = 6.25
+        beat_speed_multiplier = math.min(beat_speed_multiplier, max_multiplier)
+        local move_speed = base_speed * beat_speed_multiplier * dt
+        local move_x = battleRoyale.safe_zone_direction[1] * move_speed
+        local move_y = battleRoyale.safe_zone_direction[2] * move_speed
+        
         battleRoyale.center_x = battleRoyale.center_x + move_x
         battleRoyale.center_y = battleRoyale.center_y + move_y
+        
+        -- Keep safe zone center within screen bounds with padding
+        local padding = battleRoyale.safe_zone_radius + 50
+        battleRoyale.center_x = math.max(padding, math.min(battleRoyale.screen_width - padding, battleRoyale.center_x))
+        battleRoyale.center_y = math.max(padding, math.min(battleRoyale.screen_height - padding, battleRoyale.center_y))
+        
+        -- Update target positions for interpolation
+        battleRoyale.target_center_x = battleRoyale.center_x
+        battleRoyale.target_center_y = battleRoyale.center_y
+        battleRoyale.target_radius = battleRoyale.safe_zone_radius
+        
+        -- Track radius changes for smooth transitions
+        battleRoyale.last_radius = battleRoyale.safe_zone_radius
+    else
+        -- Client: interpolate towards target positions
+        local lerp_factor = battleRoyale.sync_interpolation_speed * dt
+        
+        -- Interpolate center position
+        battleRoyale.center_x = battleRoyale.center_x + (battleRoyale.target_center_x - battleRoyale.center_x) * lerp_factor
+        battleRoyale.center_y = battleRoyale.center_y + (battleRoyale.target_center_y - battleRoyale.center_y) * lerp_factor
+        
+        -- Interpolate radius with faster speed for smoother growth/shrinking
+        local radius_lerp_factor = battleRoyale.radius_interpolation_speed * dt
+        battleRoyale.safe_zone_radius = battleRoyale.safe_zone_radius + (battleRoyale.target_radius - battleRoyale.safe_zone_radius) * radius_lerp_factor
+        
+        -- Update last radius for smooth transitions
+        battleRoyale.last_radius = battleRoyale.safe_zone_radius
     end
 
-    -- Update shrinking safe zone with random growth periods (deterministic)
-    if true then -- Shrinking always happens now
-        -- Start shrinking immediately when game starts
-        if battleRoyale.shrink_start_time == 0 and battleRoyale.game_started then
-            battleRoyale.shrink_start_time = battleRoyale.gameTime
-            debugConsole.addMessage("[BattleRoyale] Safe zone shrinking started!")
+    -- Update random grow/shrink system
+    if battleRoyale.game_started then
+        battleRoyale.size_change_timer = battleRoyale.size_change_timer + dt
+        
+        -- Check if it's time to change size direction
+        if battleRoyale.size_change_timer >= battleRoyale.size_change_interval then
+            battleRoyale.size_change_timer = 0
+            
+            -- Use deterministic random for synchronization
+            local time_seed = math.floor(battleRoyale.gameTime * 10)
+            battleRoyale.random:setSeed(battleRoyale.seed + time_seed)
+            local random_value = battleRoyale.random:random(0, 100)
+            
+            -- Always shrink - slower rate for more gradual shrinking
+            battleRoyale.current_change_rate = -15 -- pixels per second (slower shrinking)
+            battleRoyale.change_duration = battleRoyale.random:random(2.0, 4.0) -- 2-4 seconds (longer duration)
+            debugConsole.addMessage("[SafeZone] Starting to shrink for " .. battleRoyale.change_duration .. " seconds")
+            
+            -- Restore original seed
+            battleRoyale.random:setSeed(battleRoyale.seed)
         end
         
-        -- Start shrinking immediately after game starts
-        if battleRoyale.shrink_start_time > 0 then
-            local elapsed_shrink_time = battleRoyale.gameTime - battleRoyale.shrink_start_time
+        -- Apply current size change if we have one
+        if battleRoyale.change_duration > 0 then
+            battleRoyale.change_duration = battleRoyale.change_duration - dt
             
-            -- Check for random growth periods (increases over time) - deterministic
-            if not battleRoyale.is_growing and battleRoyale.grow_timer <= 0 and elapsed_shrink_time > 2 then
-                -- Growth chance increases over time: 25% early game, 40% mid game, 60% late game (higher for testing)
-                local growth_chance = 0.25
-                if elapsed_shrink_time > 8 then
-                    growth_chance = 0.40 -- Mid game
-                end
-                if elapsed_shrink_time > 12 then
-                    growth_chance = 0.60 -- Late game
-                end
-                
-                -- Use deterministic random based on game time for synchronization
-                local time_seed = math.floor(battleRoyale.gameTime * 10) -- Check every 0.1 seconds
-                battleRoyale.random:setSeed(battleRoyale.seed + time_seed)
-                local random_value = battleRoyale.random:random(0, 100)
-                local threshold = growth_chance * 100
-                
-                
-                if random_value < threshold then
-                    battleRoyale.is_growing = true
-                    -- Growth duration increases over time: 2-3 early, 3-5 mid, 4-6 late
-                    local min_growth = 2
-                    local max_growth = 3
-                    if elapsed_shrink_time > 8 then
-                        min_growth = 3
-                        max_growth = 5
-                    end
-                    if elapsed_shrink_time > 12 then
-                        min_growth = 4
-                        max_growth = 6
-                    end
-                    
-                    battleRoyale.grow_duration = battleRoyale.random:random(min_growth, max_growth)
-                    battleRoyale.grow_timer = battleRoyale.grow_duration
-                end
-                -- Restore original seed
-                battleRoyale.random:setSeed(battleRoyale.seed)
-            end
+            -- Apply radius change
+            local new_radius = battleRoyale.safe_zone_radius + (battleRoyale.current_change_rate * dt)
             
-            -- Handle growth period
-            if battleRoyale.is_growing then
-                battleRoyale.grow_timer = battleRoyale.grow_timer - dt
-                if battleRoyale.grow_timer <= 0 then
-                    battleRoyale.is_growing = false
-                    battleRoyale.grow_duration = 0
-                end
-            else
-                -- Reset growth timer for next chance (faster checking in late game)
-                battleRoyale.grow_timer = battleRoyale.grow_timer - dt
-                if battleRoyale.grow_timer <= 0 then
-                    -- Check more frequently as game progresses
-                    if elapsed_shrink_time > 15 then
-                        battleRoyale.grow_timer = 1 -- Check every 1 second in late game
-                    else
-                        battleRoyale.grow_timer = 1.5 -- Check every 1.5 seconds in mid game
-                    end
-                end
-            end
+            -- Clamp to min/max bounds
+            battleRoyale.safe_zone_radius = math.max(battleRoyale.min_radius, 
+                                                   math.min(battleRoyale.max_radius, new_radius))
             
-            -- Only shrink if we haven't exceeded the shrink duration and not currently growing
-            if elapsed_shrink_time <= battleRoyale.shrink_duration and not battleRoyale.is_growing then
-                -- Calculate shrink rate: 350 pixels over 20 seconds = 17.5 pixels per second (from 450 to 100)
-                local shrink_rate = 350 / battleRoyale.shrink_duration
-                battleRoyale.safe_zone_radius = battleRoyale.safe_zone_radius - (dt * shrink_rate)
-            elseif battleRoyale.is_growing then
-                -- Grow during growth periods (larger growth in late game)
-                local grow_rate = 40 -- Base 40 pixels per second growth
-                if elapsed_shrink_time > 10 then
-                    grow_rate = 50 -- 50 pixels per second in mid game
-                end
-                if elapsed_shrink_time > 15 then
-                    grow_rate = 60 -- 60 pixels per second in late game
-                end
-                battleRoyale.safe_zone_radius = battleRoyale.safe_zone_radius + (dt * grow_rate)
+            if battleRoyale.change_duration <= 0 then
+                battleRoyale.current_change_rate = 0
+                debugConsole.addMessage("[SafeZone] Size change completed. Current radius: " .. math.floor(battleRoyale.safe_zone_radius))
             end
         end
     end
-    battleRoyale.safe_zone_radius = math.max(100, battleRoyale.safe_zone_radius) -- Minimum radius of 100 (stops at 100)
 
     -- Handle top-down movement (only if not eliminated)
     if not battleRoyale.player_dropped then
@@ -644,21 +765,21 @@ function battleRoyale.drawSafeZone(playersTable)
             rotation = rotation + time * 0.5 -- Continuous slow rotation
         end
         
-        -- Draw safe zone circle - always blue
+        -- Draw safe zone circle - keep fill color consistent (blue)
         local alpha = 0.2
-        local r, g, b = 0.3, 0.6, 1.0 -- Always blue
-        
-        love.graphics.setColor(r, g, b, alpha)
+        love.graphics.setColor(0.3, 0.6, 1.0, alpha) -- Always blue fill
         love.graphics.circle('fill', center_x, center_y, radius)
         
-        -- Draw safe zone border with status-based color and rhythmic rotation
+        -- Draw safe zone border with music-synced color and rhythmic rotation
         love.graphics.push()
         love.graphics.translate(center_x, center_y)
         love.graphics.rotate(rotation)
         
-        -- Always use blue border
-        love.graphics.setColor(0.4, 0.7, 1.0, 0.6) -- Always blue
-            love.graphics.circle('line', 0, 0, radius)
+        -- Use music-synced color for border only
+        local current_color = battleRoyale.safety_ring_colors[battleRoyale.current_color_index]
+        local r, g, b = current_color[1], current_color[2], current_color[3]
+        love.graphics.setColor(r, g, b, 0.8) -- Bright border with current beat color
+        love.graphics.circle('line', 0, 0, radius)
         
         love.graphics.pop()
     end
@@ -693,39 +814,31 @@ function battleRoyale.drawUI(playersTable, localPlayerId)
     end
     
     -- Show safe zone info
-    love.graphics.print('Safe Zone Radius: ' .. math.floor(battleRoyale.safe_zone_radius), 10, battleRoyale.screen_height - 80)
+    love.graphics.print('Safe Zone Radius: ' .. math.floor(battleRoyale.safe_zone_radius) .. ' (Range: ' .. battleRoyale.min_radius .. '-' .. battleRoyale.max_radius .. ')', 10, battleRoyale.screen_height - 80)
     
-    -- Show shrink status
+    -- Show current size change status
     local phase_text = "READY"
     local phase_color = {0.5, 1, 0.5}
     local timer_value = 0
     
-    if battleRoyale.shrink_start_time == 0 or not battleRoyale.game_started then
+    if not battleRoyale.game_started then
         phase_text = "READY"
         phase_color = {0.5, 1, 0.5}
-        timer_value = battleRoyale.shrink_duration
+    elseif battleRoyale.change_duration > 0 then
+        phase_text = "SHRINKING"
+        phase_color = {1, 0.5, 0.5}
+        timer_value = battleRoyale.change_duration
     else
-        local elapsed_shrink_time = love.timer.getTime() - battleRoyale.shrink_start_time
-        if battleRoyale.is_growing then
-            phase_text = "GROWING"
-            phase_color = {0.5, 1, 0.5}
-            timer_value = battleRoyale.grow_timer
-        elseif elapsed_shrink_time <= battleRoyale.shrink_duration then
-            phase_text = "SHRINKING"
-            phase_color = {1, 0.5, 0.5}
-            timer_value = battleRoyale.shrink_duration - elapsed_shrink_time
-        else
-            phase_text = "STABLE"
-            phase_color = {0.5, 1, 0.5}
-            timer_value = 0
-        end
+        phase_text = "STABLE"
+        phase_color = {0.7, 0.7, 0.7}
+        timer_value = battleRoyale.size_change_interval - battleRoyale.size_change_timer
     end
     
     love.graphics.setColor(phase_color[1], phase_color[2], phase_color[3])
     love.graphics.print('Status: ' .. phase_text, 10, battleRoyale.screen_height - 60)
     
     love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Time Left: ' .. string.format("%.1f", math.max(0, timer_value)), 10, battleRoyale.screen_height - 40)
+    love.graphics.print('Next Change: ' .. string.format("%.1f", math.max(0, timer_value)), 10, battleRoyale.screen_height - 40)
     
     -- Show respawn status more prominently
     if battleRoyale.player_dropped and battleRoyale.respawn_timer > 0 then
@@ -830,12 +943,17 @@ end
 -- All power-up related functions removed
 
 function battleRoyale.updateAsteroids(dt)
-    -- Check if we need to spawn any asteroids based on pre-calculated spawn points
+    -- Check if we need to spawn any regular asteroids based on pre-calculated spawn points
     while #battleRoyale.meteoroidSpawnPoints > 0 and battleRoyale.meteoroidSpawnPoints[1].time <= battleRoyale.gameTime do
         battleRoyale.spawnAsteroidFromSpawnPoint(table.remove(battleRoyale.meteoroidSpawnPoints, 1))
     end
     
-    -- Update existing asteroids
+    -- Check if we need to spawn any music asteroids based on pre-calculated spawn points
+    while #battleRoyale.musicAsteroidSpawnPoints > 0 and battleRoyale.musicAsteroidSpawnPoints[1].time <= battleRoyale.gameTime do
+        battleRoyale.spawnMusicAsteroidFromSpawnPoint(table.remove(battleRoyale.musicAsteroidSpawnPoints, 1))
+    end
+    
+    -- Update existing regular asteroids
     for i = #battleRoyale.asteroids, 1, -1 do
         local asteroid = battleRoyale.asteroids[i]
         
@@ -853,6 +971,21 @@ function battleRoyale.updateAsteroids(dt)
         if asteroid.x < -50 or asteroid.x > battleRoyale.screen_width + 50 or
            asteroid.y < -50 or asteroid.y > battleRoyale.screen_height + 50 then
             table.remove(battleRoyale.asteroids, i)
+        end
+    end
+    
+    -- Update music-synced asteroids
+    for i = #battleRoyale.music_asteroids, 1, -1 do
+        local asteroid = battleRoyale.music_asteroids[i]
+        
+        -- Music asteroids move at consistent speed (no speed multiplier)
+        asteroid.x = asteroid.x + asteroid.vx * dt
+        asteroid.y = asteroid.y + asteroid.vy * dt
+        
+        -- Remove asteroids that are off screen
+        if asteroid.x < -50 or asteroid.x > battleRoyale.screen_width + 50 or
+           asteroid.y < -50 or asteroid.y > battleRoyale.screen_height + 50 then
+            table.remove(battleRoyale.music_asteroids, i)
         end
     end
 end
@@ -927,6 +1060,44 @@ function battleRoyale.spawnAsteroid()
     table.insert(battleRoyale.asteroids, asteroid)
 end
 
+function battleRoyale.spawnMusicAsteroidFromSpawnPoint(spawnInfo)
+    local asteroid = {}
+    local side = spawnInfo.side
+    local speed = spawnInfo.speed
+    local size = spawnInfo.size
+    
+    if side == 1 then -- Top
+        asteroid.x = battleRoyale.random:random(0, battleRoyale.screen_width)
+        asteroid.y = -50
+        asteroid.vx = battleRoyale.random:random(-speed/4, speed/4)
+        asteroid.vy = battleRoyale.random:random(speed/4, speed)
+    elseif side == 2 then -- Right
+        asteroid.x = battleRoyale.screen_width + 50
+        asteroid.y = battleRoyale.random:random(0, battleRoyale.screen_height)
+        asteroid.vx = battleRoyale.random:random(-speed, -speed/4)
+        asteroid.vy = battleRoyale.random:random(-speed/4, speed/4)
+    elseif side == 3 then -- Bottom
+        asteroid.x = battleRoyale.random:random(0, battleRoyale.screen_width)
+        asteroid.y = battleRoyale.screen_height + 50
+        asteroid.vx = battleRoyale.random:random(-speed/4, speed/4)
+        asteroid.vy = battleRoyale.random:random(-speed, -speed/4)
+    else -- Left
+        asteroid.x = -50
+        asteroid.y = battleRoyale.random:random(0, battleRoyale.screen_height)
+        asteroid.vx = battleRoyale.random:random(speed/4, speed)
+        asteroid.vy = battleRoyale.random:random(-speed/4, speed/4)
+    end
+    
+    asteroid.size = size
+    asteroid.color = battleRoyale.music_asteroid_colors[battleRoyale.music_asteroid_color_index] -- Use current beat color
+    asteroid.points = {} -- Store irregular shape points
+    asteroid.is_music_asteroid = true -- Mark as music asteroid
+    battleRoyale.generateAsteroidShape(asteroid) -- Generate the irregular shape
+    
+    table.insert(battleRoyale.music_asteroids, asteroid)
+    debugConsole.addMessage("[MusicAsteroid] Spawned music-synced asteroid at time " .. spawnInfo.time)
+end
+
 function battleRoyale.generateAsteroidShape(asteroid)
     -- Generate irregular asteroid shape with 6-8 points using deterministic random
     local num_points = battleRoyale.random:random(6, 8)
@@ -950,6 +1121,7 @@ function battleRoyale.generateAsteroidShape(asteroid)
 end
 
 function battleRoyale.drawAsteroids()
+    -- Draw regular asteroids (unchanged)
     for _, asteroid in ipairs(battleRoyale.asteroids) do
         love.graphics.push()
         love.graphics.translate(asteroid.x, asteroid.y)
@@ -964,9 +1136,42 @@ function battleRoyale.drawAsteroids()
         
         love.graphics.pop()
     end
+    
+    -- Draw music-synced asteroids with beat effects
+    for i, asteroid in ipairs(battleRoyale.music_asteroids) do
+        love.graphics.push()
+        love.graphics.translate(asteroid.x, asteroid.y)
+        
+        -- Get music effects for asteroids
+        local pulseColor = musicHandler.getCurrentColor("asteroid_pulse")
+        local x, y, rotation, scaleX, scaleY = musicHandler.applyToDrawable("music_asteroids", 0, 0)
+        
+        -- Apply rotation and scale from music effects
+        love.graphics.rotate(rotation or 0)
+        love.graphics.scale(scaleX or 1, scaleY or 1)
+        
+        -- Use the asteroid's stored color (set when spawned) with pulse effect
+        local baseColor = asteroid.color or {0.8, 0.3, 0.8}
+        local finalColor = {
+            baseColor[1] * pulseColor[1],
+            baseColor[2] * pulseColor[2], 
+            baseColor[3] * pulseColor[3]
+        }
+        
+        -- Draw asteroid with dynamic color
+        love.graphics.setColor(finalColor[1], finalColor[2], finalColor[3])
+        love.graphics.polygon('fill', asteroid.points)
+        
+        -- Draw outline with darker color
+        love.graphics.setColor(finalColor[1] * 0.6, finalColor[2] * 0.6, finalColor[3] * 0.6)
+        love.graphics.polygon('line', asteroid.points)
+        
+        love.graphics.pop()
+    end
 end
 
 function battleRoyale.checkAsteroidCollisions()
+    -- Check collisions with regular asteroids
     for _, asteroid in ipairs(battleRoyale.asteroids) do
         -- Check collision with player
         if battleRoyale.checkCollision(battleRoyale.player, {
@@ -980,7 +1185,26 @@ function battleRoyale.checkAsteroidCollisions()
                 battleRoyale.death_timer = 2 -- 2 second death animation
                 battleRoyale.death_shake = 15 -- Shake intensity
                 battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
-                debugConsole.addMessage("[BattleRoyale] Player hit by asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
+                debugConsole.addMessage("[BattleRoyale] Player hit by regular asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
+            end
+        end
+    end
+    
+    -- Check collisions with music-synced asteroids
+    for _, asteroid in ipairs(battleRoyale.music_asteroids) do
+        -- Check collision with player
+        if battleRoyale.checkCollision(battleRoyale.player, {
+            x = asteroid.x - asteroid.size/2,
+            y = asteroid.y - asteroid.size/2,
+            width = asteroid.size,
+            height = asteroid.size
+        }) then
+            if not battleRoyale.player.is_invincible and not battleRoyale.player_dropped then
+                battleRoyale.player_dropped = true
+                battleRoyale.death_timer = 2 -- 2 second death animation
+                battleRoyale.death_shake = 15 -- Shake intensity
+                battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
+                debugConsole.addMessage("[BattleRoyale] Player hit by music asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
             end
         end
     end
@@ -999,11 +1223,18 @@ end
 function battleRoyale.sendGameStateSync()
     -- Only send sync from host
     if _G and _G.returnState == "hosting" and _G.serverClients then
-        local message = string.format("battle_sync,%.2f,%.2f,%.2f,%.2f", 
+        -- Compact message format for high-frequency updates
+        local message = string.format("bsync,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%.1f,%.1f,%d", 
             battleRoyale.gameTime, 
             battleRoyale.center_x, 
             battleRoyale.center_y, 
-            battleRoyale.safe_zone_radius)
+            battleRoyale.safe_zone_radius,
+            battleRoyale.current_color_index,
+            battleRoyale.current_direction_index,
+            battleRoyale.beat_count,
+            battleRoyale.current_change_rate,
+            battleRoyale.change_duration,
+            battleRoyale.music_asteroid_color_index)
         
         for _, client in ipairs(_G.serverClients) do
             -- Use the global safeSend function

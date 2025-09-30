@@ -70,6 +70,14 @@ function instructions.show(gameType, callback)
             callback()
         end
         return
+    elseif gameType == "fightgame" then
+        -- Skip instruction screen for fight game
+        instructions.showing = false
+        instructions.isTransitioning = false
+        if callback then
+            callback()
+        end
+        return
     elseif gameType == "racegame" then
         instructions.currentAnim = instructions.raceAnim
         instructions.currentSprite = instructions.raceSprite

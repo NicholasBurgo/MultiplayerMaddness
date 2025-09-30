@@ -10,6 +10,7 @@ local laserGame = require "scripts.lasergame"
 local battleRoyale = require "scripts.battleroyale"
 local dodgeGame = require "scripts.dodgegame"
 local raceGame = require "scripts.racegame"
+local fightGame = require "scripts.fightgame"
 local characterCustomization = require "scripts.charactercustom"
 local scoreLobby = require "scripts.scorelobby"
 local debugConsole = require "scripts.debugconsole"
@@ -49,7 +50,8 @@ local miniGameLineup = {
     "jumpgame",
     "lasergame", 
     "battleroyale",
-    "dodgegame"
+    "dodgegame",
+    "fightgame"
 }
 local currentGameIndex = 1
 
@@ -477,6 +479,8 @@ function love.update(dt)
         currentPartyGame = "battleroyale"
     elseif gameState == "dodgegame" then
         currentPartyGame = "dodgegame"
+    elseif gameState == "fightgame" then
+        currentPartyGame = "fightgame"
     end
 
     -- Check for party mode transition flag (host only)
@@ -554,6 +558,23 @@ function love.update(dt)
             for _, client in ipairs(serverClients) do
                 safeSend(client, "start_dodge_game," .. seed)
             end
+        elseif nextGame == "fightgame" then
+            gameState = "fightgame"
+            _G.returnState = returnState
+            _G.gameState = "fightgame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            initializeRoundWins()
+            
+            local seed = os.time() + love.timer.getTime() * 10000
+            fightGame.reset()
+            fightGame.setSeed(seed)
+            fightGame.setPlayerColor(localPlayer.color)
+            
+            -- Host notifies clients
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_fight_game," .. seed)
+            end
         end
         
         -- Send specific game transition to clients
@@ -573,6 +594,8 @@ function love.update(dt)
             currentPartyGame = "battleroyale"
         elseif gameState == "dodgegame" then
             currentPartyGame = "dodgegame"
+        elseif gameState == "fightgame" then
+            currentPartyGame = "fightgame"
         end
     end
 
@@ -921,6 +944,32 @@ function love.update(dt)
             dodgeGame.reset()
             partyModeTransitioned = false -- Reset for next game
         end
+    elseif gameState == "fightgame" then
+        if returnState == "hosting" then
+            if serverHost then
+                updateServer()
+            else
+                debugConsole.addMessage("[FightGame] Cannot update server - serverHost is nil")
+            end
+        else
+            updateClient()
+        end
+        
+        fightGame.update(dt)
+        
+        -- Check if game is over
+        if fightGame.game_over then
+            -- Only return to lobby if not in party mode
+            if not partyMode then
+                gameState = returnState
+                debugConsole.addMessage("Returned to state: " .. gameState)
+            else
+                debugConsole.addMessage("Party mode active, staying in fight game state for next game")
+            end
+            
+            fightGame.reset()
+            partyModeTransitioned = false -- Reset for next game
+        end
     elseif gameState == "hosting" then
         updateServer()
     elseif gameState == "playing" or gameState == "connecting" then
@@ -1036,8 +1085,26 @@ function updateServer()
         end
     end
     
+    -- send fight game positions
+    if gameState == "fightgame" and serverHost then
+        local fightX = fightGame.player.x
+        local fightY = fightGame.player.y 
+        
+        -- Send position data
+        for _, client in ipairs(serverClients) do
+            safeSend(client, string.format("fight_position,0,%.2f,%.2f,%.2f,%.2f,%.2f",
+                fightX, fightY,
+                localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
+        end
+    end
+    
 
     -- Handle network events
+    if not serverHost then
+        debugConsole.addMessage("[Server] serverHost became nil during updateServer!")
+        return
+    end
+    
     local event = serverHost:service(0)
     while event do
         if event.type == "connect" then
@@ -1185,9 +1252,20 @@ function updateClient()
             local dodgeX = dodgeGame.player.x
             local dodgeY = dodgeGame.player.y
             
+        -- Send position data
+        safeSend(server, string.format("dodge_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
+            localPlayer.id, dodgeX, dodgeY,
+            localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
+        end
+        
+        -- fight game positions
+        if gameState == "fightgame" then
+            local fightX = fightGame.player.x
+            local fightY = fightGame.player.y
+            
             -- Send position data
-            safeSend(server, string.format("dodge_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
-                localPlayer.id, dodgeX, dodgeY,
+            safeSend(server, string.format("fight_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
+                localPlayer.id, fightX, fightY,
                 localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
         end
         
@@ -1206,6 +1284,9 @@ function love.draw()
     elseif gameState == "dodgegame" then
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
+    elseif gameState == "fightgame" then
+        debugConsole.addMessage("[Draw] Drawing fight game")
+        fightGame.draw(players, localPlayer.id)
     elseif gameState == "menu" then
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
@@ -1269,7 +1350,7 @@ function love.draw()
         
         if gameState ~= "instructions" then
             love.graphics.setColor(1, 1, 0)
-            love.graphics.printf("(1) Jump Game, (2) Laser Game, (3) Battle Royale, (4) Dodge Laser, (P) Party Mode", 
+            love.graphics.printf("(1) Jump Game, (2) Laser Game, (3) Battle Royale, (4) Dodge Laser, (5) Fight Game, (P) Party Mode", 
                 0, love.graphics.getHeight() - 30, love.graphics.getWidth(), "center")
         end
     end
@@ -1404,6 +1485,9 @@ function love.mousepressed(x, y, button)
     
     -- Handle game-specific mouse input
     -- Battle royale uses spacebar for power-ups, not mouse
+    if gameState == "fightgame" then
+        fightGame.mousepressed(x, y, button)
+    end
 end
 
 function love.keypressed(key)
@@ -1431,7 +1515,7 @@ function love.keypressed(key)
     end
 
     -- Only allow host to start games
-    if key == "1" or key == "2" or key == "3" or key == "4" then
+    if key == "1" or key == "2" or key == "3" or key == "4" or key == "5" then
         if gameState ~= "hosting" then
             debugConsole.addMessage("[Game] Only the host can start games")
             return
@@ -1540,6 +1624,31 @@ function love.keypressed(key)
                     debugConsole.addMessage("[Host] Sent dodge game start to client")
                 end
             end)
+        elseif key == "5" then
+            -- Start fight game directly (no instructions for now)
+            -- Make sure server is properly initialized
+            if not serverHost then
+                debugConsole.addMessage("[FightGame] Server not initialized, cannot start fight game")
+                return
+            end
+            
+            gameState = "fightgame"
+            returnState = "hosting"
+            _G.returnState = "hosting"
+            _G.gameState = "fightgame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            initializeRoundWins()
+            
+            local seed = os.time() + love.timer.getTime() * 10000
+            fightGame.reset()
+            fightGame.setSeed(seed)
+            fightGame.setPlayerColor(localPlayer.color)
+            
+            -- Host notifies clients
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_fight_game," .. seed)
+            end
         end
     end
     if key == "p" then
@@ -1592,6 +1701,11 @@ function love.keypressed(key)
     -- Battle royale spacebar handled above, other keys handled here
     if gameState == "battleroyale" and key ~= " " then
         battleRoyale.keypressed(key)
+    end
+    
+    -- Fight game spacebar and other keys
+    if gameState == "fightgame" then
+        fightGame.keypressed(key)
     end
 end
 
@@ -1786,7 +1900,32 @@ function handleServerMessage(id, data)
         end
         return
     end
-
+    
+    -- Handle fight game positions
+    if data:match("fight_position,(%d+),") then
+        local parts = {}
+        for part in data:gmatch("([^,]+)") do
+            table.insert(parts, part)
+        end
+        
+        if #parts >= 7 then
+            local playerId = tonumber(parts[2])
+            local x = tonumber(parts[3])
+            local y = tonumber(parts[4])
+            local r = tonumber(parts[5])
+            local g = tonumber(parts[6])
+            local b = tonumber(parts[7])
+            
+            if not players[playerId] then
+                players[playerId] = {}
+            end
+            players[playerId].fightX = x
+            players[playerId].fightY = y
+            players[playerId].color = {r, g, b}
+        end
+        return
+    end
+    
     -- Handle dodge game positions
     if data:match("dodge_position,(%d+),") then
         local parts = {}
@@ -2106,10 +2245,31 @@ function handleClientMessage(data)
         elseif nextGame == "dodgegame" then
             gameState = "dodgegame"
             -- Client will receive seed in start_dodge_game message
+        elseif nextGame == "fightgame" then
+            gameState = "fightgame"
+            -- Client will receive seed in start_fight_game message
         end
         return
     end
-
+    
+    if data:match("^start_fight_game,") then
+        local seed = tonumber(data:match("^start_fight_game,(%d+)"))
+        debugConsole.addMessage("[Client] RECEIVED FIGHT GAME START MESSAGE with seed: " .. seed)
+        if seed then
+            gameState = "fightgame"
+            returnState = "playing"
+            _G.returnState = "playing"
+            _G.gameState = "fightgame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            fightGame.reset()
+            fightGame.setSeed(seed)
+            fightGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Client] Fight game loaded successfully with seed: " .. seed)
+        end
+        return
+    end
+    
     if data == "show_battleroyale_instructions" then
         instructions.show("battleroyale", function() end)
         return
@@ -2297,7 +2457,32 @@ function handleClientMessage(data)
         return
     end
     
-    
+    if data:match("^fight_position,") then
+        -- Parse the message using comma delimiter like laser game
+        local parts = {}
+        for part in data:gmatch("([^,]+)") do
+            table.insert(parts, part)
+        end
+        
+        if #parts >= 7 then
+            local id = tonumber(parts[2])
+            local x = tonumber(parts[3])
+            local y = tonumber(parts[4])
+            local r = tonumber(parts[5])
+            local g = tonumber(parts[6])
+            local b = tonumber(parts[7])
+            
+            if id and id ~= localPlayer.id then
+                if not players[id] then
+                    players[id] = {}
+                end
+                players[id].fightX = x
+                players[id].fightY = y
+                players[id].color = {r, g, b}
+            end
+        end
+        return
+    end
 
     if data:match("^dodge_position,") then
         -- Parse the message using comma delimiter like laser game
@@ -2486,21 +2671,49 @@ function handleClientMessage(data)
     -- Power-ups removed from game - no handling needed
 
     -- Handle battle royale game state synchronization
-    if data:match("^battle_sync,") then
-        local gameTime, centerX, centerY, radius = data:match("^battle_sync,([-%d.]+),([-%d.]+),([-%d.]+),([-%d.]+)")
-        if gameTime and centerX and centerY and radius then
+    if data:match("^bsync,") then
+        local gameTime, centerX, centerY, radius, colorIndex, directionIndex, beatCount, changeRate, changeDuration, musicColorIndex = data:match("^bsync,([-%d.]+),([-%d.]+),([-%d.]+),([-%d.]+),([-%d]+),([-%d]+),([-%d]+),([-%d.]+),([-%d.]+),([-%d]+)")
+        if gameTime and centerX and centerY and radius and colorIndex and directionIndex and beatCount and changeRate and changeDuration and musicColorIndex then
             gameTime = tonumber(gameTime)
             centerX = tonumber(centerX)
             centerY = tonumber(centerY)
             radius = tonumber(radius)
+            colorIndex = tonumber(colorIndex)
+            directionIndex = tonumber(directionIndex)
+            beatCount = tonumber(beatCount)
+            changeRate = tonumber(changeRate)
+            changeDuration = tonumber(changeDuration)
+            musicColorIndex = tonumber(musicColorIndex)
             
             -- Sync game state with host
             battleRoyale.gameTime = gameTime
-            battleRoyale.center_x = centerX
-            battleRoyale.center_y = centerY
-            battleRoyale.safe_zone_radius = radius
+            battleRoyale.current_color_index = colorIndex
+            battleRoyale.current_direction_index = directionIndex
+            battleRoyale.beat_count = beatCount
+            battleRoyale.current_change_rate = changeRate
+            battleRoyale.change_duration = changeDuration
+            battleRoyale.music_asteroid_color_index = musicColorIndex
             
-            debugConsole.addMessage("[Client] Synced game state: time=" .. gameTime .. ", center=(" .. centerX .. "," .. centerY .. "), radius=" .. radius)
+            -- Set target positions for smooth interpolation
+            battleRoyale.target_center_x = centerX
+            battleRoyale.target_center_y = centerY
+            
+            -- Smooth radius changes - only update if change is significant
+            local radius_diff = math.abs(radius - (battleRoyale.target_radius or battleRoyale.safe_zone_radius))
+            if radius_diff > 1.0 then -- Only update if radius changed by more than 1 pixel
+                battleRoyale.target_radius = radius
+            end
+            
+            -- Update safe zone direction based on synced direction index
+            battleRoyale.safe_zone_direction = battleRoyale.safety_ring_directions[directionIndex]
+            
+            -- Only log sync every 60 updates (once per second) to avoid spam
+            if not battleRoyale.sync_log_timer then battleRoyale.sync_log_timer = 0 end
+            battleRoyale.sync_log_timer = battleRoyale.sync_log_timer + 1
+            if battleRoyale.sync_log_timer >= 60 then
+                debugConsole.addMessage("[Client] Synced game state: time=" .. gameTime .. ", center=(" .. centerX .. "," .. centerY .. "), radius=" .. radius .. ", color=" .. colorIndex .. ", direction=" .. directionIndex .. ", beats=" .. beatCount .. ", changeRate=" .. changeRate .. ", changeDuration=" .. changeDuration)
+                battleRoyale.sync_log_timer = 0
+            end
         end
         return
     end

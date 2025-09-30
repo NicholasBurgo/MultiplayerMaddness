@@ -22,11 +22,11 @@ dodgeGame.game_started = false
 dodgeGame.start_timer = 1 -- Reduced from 3 to 1 second
 dodgeGame.timer = 30 -- 30 seconds
 dodgeGame.laser_tracking_time = 3.0 -- 2-4 seconds tracking time (randomized)
-dodgeGame.laser_duration = 0.5 -- 0.5 seconds active time (half duration)
+dodgeGame.laser_duration = 1.0 -- 1 second active time
 dodgeGame.laser_width = 24 -- Width of the laser beam (3x indicator width)
 dodgeGame.indicator_width = 8 -- Width of the tracking indicator
 dodgeGame.indicator_drag_speed = 0.3 -- How fast indicator follows player (0.1 = slow, 1.0 = instant)
-dodgeGame.laser_spawn_interval = 1.0 -- Spawn laser every beat for rhythm
+dodgeGame.laser_spawn_interval = 3.0 -- Spawn laser every 3 seconds
 dodgeGame.next_laser_time = 0
 
 -- Player settings
@@ -48,70 +48,7 @@ dodgeGame.stars = {} -- Moving starfield background
 dodgeGame.star_direction = 0 -- Global direction for all stars
 dodgeGame.player_dropped = false
 
--- Laser structure: {x, y, target_player_id, tracking_time, active_time, is_active, is_tracking, target_x, stop_tracking_time, is_horizontal, direction}
--- Particle system for colorful effects
-dodgeGame.particles = {}
-dodgeGame.particle_lifetime = 0.5
-dodgeGame.particles_per_end = 8
-dodgeGame.particle_speed = 100
-dodgeGame.particle_size = 3
-dodgeGame.particle_colors = {
-    {1, 0, 0, 1},    -- Red
-    {1, 0.5, 0, 1},  -- Orange
-    {1, 1, 0, 1},    -- Yellow
-    {0, 1, 0, 1},    -- Green
-    {0, 0, 1, 1},    -- Blue
-    {1, 0, 1, 1}     -- Magenta
-}
-
-function dodgeGame.createParticles(x, y, angle)
-    local particles = {}
-    for i = 1, dodgeGame.particles_per_end do
-        -- Spread particles in a 90-degree arc centered on the main angle
-        local spread = math.pi / 4  -- 45 degrees
-        local particleAngle = angle + (love.math.random() - 0.5) * spread
-        local speed = love.math.random(50, dodgeGame.particle_speed)
-        local color = dodgeGame.particle_colors[love.math.random(#dodgeGame.particle_colors)]
-        
-        table.insert(particles, {
-            x = x,
-            y = y,
-            dx = math.cos(particleAngle) * speed,
-            dy = math.sin(particleAngle) * speed,
-            size = love.math.random(1, dodgeGame.particle_size),
-            lifetime = dodgeGame.particle_lifetime * love.math.random(0.8, 1.2),
-            color = color
-        })
-    end
-    table.insert(dodgeGame.particles, particles)
-end
-
-function dodgeGame.updateParticles(dt)
-    for i = #dodgeGame.particles, 1, -1 do
-        local particleGroup = dodgeGame.particles[i]
-        local allDead = true
-        
-        for j = #particleGroup, 1, -1 do
-            local particle = particleGroup[j]
-            particle.lifetime = particle.lifetime - dt
-            
-            if particle.lifetime <= 0 then
-                table.remove(particleGroup, j)
-            else
-                allDead = false
-                particle.x = particle.x + particle.dx * dt
-                particle.y = particle.y + particle.dy * dt
-                particle.dy = particle.dy + 200 * dt  -- Add gravity
-                -- Fade out color
-                particle.color[4] = particle.lifetime / dodgeGame.particle_lifetime
-            end
-        end
-        
-        if allDead then
-            table.remove(dodgeGame.particles, i)
-        end
-    end
-end
+-- Laser structure: {x, y, target_player_id, tracking_time, active_time, is_active, is_tracking, target_x, stop_tracking_time}
 
 function dodgeGame.load()
     debugConsole.addMessage("[DodgeGame] Loading dodge laser game")
@@ -125,27 +62,13 @@ function dodgeGame.load()
     dodgeGame.gameTime = 0
     dodgeGame.next_laser_time = 0
     dodgeGame.lasers = {}
-    dodgeGame.particles = {}
     dodgeGame.player_dropped = false
     
     debugConsole.addMessage("[DodgeGame] Dodge laser game loaded successfully")
 
     dodgeGame.keysPressed = {}
     
-    -- Add rhythmic effects for lasers
-    musicHandler.addEffect("laser_warning", "beatPulse", {
-        baseColor = {1, 0, 0},
-        intensity = 0.8,
-        duration = 0.3
-    })
-    
-    musicHandler.addEffect("laser_active", "combo", {
-        scaleAmount = 0,
-        rotateAmount = 0,
-        frequency = 4, -- Fast pulsing
-        phase = 0,
-        snapDuration = 0.1
-    })
+    -- Laser colors now match laser game (static red colors)
 
     -- Reset player
     dodgeGame.player = {
@@ -159,7 +82,7 @@ function dodgeGame.load()
         invincibility_timer = 0
     }
     
-    -- Set star direction for chase scene effect (top to bottom)
+    -- Set star direction for this round (top to bottom for space movement effect)
     dodgeGame.star_direction = math.pi / 2  -- 90 degrees (downward)
     
     -- Create game elements
@@ -185,8 +108,8 @@ function dodgeGame.setSeed(seed)
         }
         table.insert(dodgeGame.laserSpawnPoints, spawnInfo)
         
-        -- Spawn lasers rhythmically tied to beat (every 0.5-1.5 beats)
-        time = time + dodgeGame.random:random(0.5, 1.5)
+        -- Spawn lasers every 3-5 seconds
+        time = time + dodgeGame.random:random(3, 5)
     end
     
     debugConsole.addMessage(string.format(
@@ -262,9 +185,6 @@ function dodgeGame.update(dt)
     -- Update starfield
     dodgeGame.updateStars(dt)
     
-    -- Update particles
-    dodgeGame.updateParticles(dt)
-    
     -- Update scoring based on survival time
     dodgeGame.current_round_score = dodgeGame.current_round_score + math.floor(dt * 10)
     
@@ -281,9 +201,6 @@ function dodgeGame.draw(playersTable, localPlayerId)
     
     -- Draw starfield background
     dodgeGame.drawStars()
-    
-    -- Draw particles
-    dodgeGame.drawParticles()
     
     -- Draw lasers
     dodgeGame.drawLasers()
@@ -424,13 +341,13 @@ end
 
 function dodgeGame.createStars()
     dodgeGame.stars = {}
-    -- Create a moving starfield with uniform direction and color
+    -- Create a moving starfield moving from top to bottom (space movement effect)
     for i = 1, 150 do
         table.insert(dodgeGame.stars, {
             x = math.random(0, dodgeGame.screen_width),
-            y = math.random(0, dodgeGame.screen_height),
+            y = math.random(-dodgeGame.screen_height, dodgeGame.screen_height), -- Start above screen for smooth entry
             size = math.random(1, 3),
-            speed = math.random(120, 200) -- Much faster movement for chase scene effect
+            speed = math.random(60, 180) -- 3x faster movement speed (60-180 pixels per second)
         })
     end
 end
@@ -439,12 +356,11 @@ function dodgeGame.updateStars(dt)
     for i = #dodgeGame.stars, 1, -1 do
         local star = dodgeGame.stars[i]
         
-        -- Move star in the global direction with slight speed variation for chase effect
-        local speedVariation = 1 + math.sin(star.x * 0.01 + love.timer.getTime() * 2) * 0.2
-        star.x = star.x + math.cos(dodgeGame.star_direction) * star.speed * speedVariation * dt
-        star.y = star.y + math.sin(dodgeGame.star_direction) * star.speed * speedVariation * dt
+        -- Move star in the global direction
+        star.x = star.x + math.cos(dodgeGame.star_direction) * star.speed * dt
+        star.y = star.y + math.sin(dodgeGame.star_direction) * star.speed * dt
         
-        -- Wrap around screen edges for chase scene effect
+        -- Wrap around screen edges
         if star.x < 0 then
             star.x = dodgeGame.screen_width
         elseif star.x > dodgeGame.screen_width then
@@ -453,8 +369,9 @@ function dodgeGame.updateStars(dt)
         
         -- For top-to-bottom movement, wrap stars from bottom to top
         if star.y > dodgeGame.screen_height then
-            star.y = -10  -- Start slightly above screen for smooth appearance
-            star.x = math.random(0, dodgeGame.screen_width)  -- Randomize horizontal position
+            star.y = -20 -- Start slightly above screen for smooth entry
+        elseif star.y < -20 then
+            star.y = dodgeGame.screen_height + 20 -- Keep moving if above screen
         end
     end
 end
@@ -463,15 +380,6 @@ function dodgeGame.drawStars()
     for _, star in ipairs(dodgeGame.stars) do
         love.graphics.setColor(1, 1, 1, 0.8) -- Uniform white color with slight transparency
         love.graphics.circle('fill', star.x, star.y, star.size)
-    end
-end
-
-function dodgeGame.drawParticles()
-    for _, particleGroup in ipairs(dodgeGame.particles) do
-        for _, particle in ipairs(particleGroup) do
-            love.graphics.setColor(particle.color)
-            love.graphics.circle("fill", particle.x, particle.y, particle.size)
-        end
     end
 end
 
@@ -510,45 +418,12 @@ function dodgeGame.updateLasers(dt)
             if laser.tracking_time <= 0 then
                 laser.is_tracking = false
                 laser.is_active = true
-                -- Create particle effects when laser becomes active
-                dodgeGame.createParticles(laser.x, 0, math.pi / 2)  -- Top, shooting down
-                dodgeGame.createParticles(laser.x, dodgeGame.screen_height, -math.pi / 2)  -- Bottom, shooting up
-            end
-        elseif laser.target_player_id == -2 then
-            -- Side laser - moves vertically towards center and stops there
-            if not laser.is_active then
-                -- Move laser towards center
-                local moveSpeed = dodgeGame.screen_height / 2 -- Speed to reach center in 1 second
-                laser.y = laser.y + laser.direction * moveSpeed * dt
-                
-                -- Check if laser has reached center - stop exactly at center
-                if (laser.direction > 0 and laser.y >= dodgeGame.screen_height / 2) or
-                   (laser.direction < 0 and laser.y <= dodgeGame.screen_height / 2) then
-                    -- Stop at center
-                    laser.y = dodgeGame.screen_height / 2
-                    laser.is_active = true
-                    -- Create particle effects when laser becomes active
-                    dodgeGame.createParticles(laser.x, 0, math.pi / 2)  -- Top, shooting down
-                    dodgeGame.createParticles(laser.x, dodgeGame.screen_height, -math.pi / 2)  -- Bottom, shooting up
-                end
-            else
-                laser.active_time = laser.active_time - dt
-                -- Remove laser after it's been active
-                if laser.active_time <= 0 then
-                    -- Create particle effects when laser disappears
-                    dodgeGame.createParticles(laser.x, 0, math.pi / 2)  -- Top, shooting down
-                    dodgeGame.createParticles(laser.x, dodgeGame.screen_height, -math.pi / 2)  -- Bottom, shooting up
-                    table.remove(dodgeGame.lasers, i)
-                end
             end
         elseif laser.is_active then
             laser.active_time = laser.active_time - dt
             
             -- Remove laser after it's been active
             if laser.active_time <= 0 then
-                -- Create particle effects when laser disappears
-                dodgeGame.createParticles(laser.x, 0, math.pi / 2)  -- Top, shooting down
-                dodgeGame.createParticles(laser.x, dodgeGame.screen_height, -math.pi / 2)  -- Bottom, shooting up
                 table.remove(dodgeGame.lasers, i)
             end
         end
@@ -556,45 +431,6 @@ function dodgeGame.updateLasers(dt)
 end
 
 function dodgeGame.spawnLaserFromSpawnPoint(spawnInfo)
-    -- 70% chance for side lasers, 30% chance for tracking laser
-    local isSideLaser = dodgeGame.random:random() < 0.7
-    
-    if isSideLaser then
-        -- Create pair of horizontal lasers coming from top and bottom
-        local laserX = dodgeGame.random:random(100, dodgeGame.screen_width - 100)
-        
-        -- Top laser (moving down to center)
-        local topLaser = {
-            x = laserX,
-            y = 0,
-            target_player_id = -2, -- Special ID for side lasers
-            tracking_time = 1.0, -- 1 second to reach center
-            active_time = dodgeGame.laser_duration,
-            is_active = false,
-            is_tracking = false,
-            is_horizontal = false, -- Vertical movement
-            direction = 1, -- Moving down
-            stop_tracking_time = 0
-        }
-        
-        -- Bottom laser (moving up to center)
-        local bottomLaser = {
-            x = laserX,
-            y = dodgeGame.screen_height,
-            target_player_id = -2, -- Special ID for side lasers
-            tracking_time = 1.0, -- 1 second to reach center
-            active_time = dodgeGame.laser_duration,
-            is_active = false,
-            is_tracking = false,
-            is_horizontal = false, -- Vertical movement
-            direction = -1, -- Moving up
-            stop_tracking_time = 0
-        }
-        
-        table.insert(dodgeGame.lasers, topLaser)
-        table.insert(dodgeGame.lasers, bottomLaser)
-    else
-        -- Tracking laser (vertical)
     local laser = {}
     
     -- Select random target player (including local player)
@@ -626,41 +462,32 @@ function dodgeGame.spawnLaserFromSpawnPoint(spawnInfo)
     laser.target_player_id = targetPlayerId
     laser.tracking_time = dodgeGame.random:random(2, 4) -- 2-4 seconds tracking
     laser.stop_tracking_time = 1.0 -- Stop tracking 1 second before firing
+    laser.active_time = dodgeGame.laser_duration -- 1 second active
     laser.is_active = false
     laser.is_tracking = true
-        laser.is_horizontal = false
-        laser.direction = 0
-        laser.active_time = dodgeGame.laser_duration -- 0.5 seconds active
     
     table.insert(dodgeGame.lasers, laser)
-    end
 end
 
 function dodgeGame.drawLasers()
     for _, laser in ipairs(dodgeGame.lasers) do
         if laser.is_tracking then
-            -- Draw tracking indicator in red (vertical)
-            love.graphics.setColor(1, 0, 0, 0.6)  -- Red color
+            -- Draw tracking indicator (red line that follows player - matches laser game)
+            love.graphics.setColor(1, 0, 0, 0.3)
             love.graphics.setLineWidth(dodgeGame.indicator_width)
             love.graphics.line(laser.x, 0, laser.x, dodgeGame.screen_height)
             love.graphics.setLineWidth(1)
-        elseif laser.target_player_id == -2 and not laser.is_active then
-            -- Draw side laser warning (blue, vertical) - moving towards center
-            love.graphics.setColor(0, 0, 1, 0.4)  -- Blue warning color
-            love.graphics.setLineWidth(dodgeGame.indicator_width)
-            love.graphics.line(laser.x, 0, laser.x, dodgeGame.screen_height)
-            love.graphics.setLineWidth(1)
+            
+            -- Draw target indicator at the bottom
+            love.graphics.setColor(1, 0, 0, 0.8)
+            love.graphics.circle('fill', laser.x, dodgeGame.screen_height - 20, 8)
+            love.graphics.setColor(1, 1, 1, 0.8)
+            love.graphics.circle('line', laser.x, dodgeGame.screen_height - 20, 8)
         elseif laser.is_active then
-            -- Draw active laser in red
-            love.graphics.setColor(1, 0, 0, 1.0)  -- Bright red color
+            -- Draw active laser (red vertical line - matches laser game)
+            love.graphics.setColor(1, 0, 0, 0.8)
             love.graphics.setLineWidth(dodgeGame.laser_width)
-            if laser.is_horizontal then
-                -- Horizontal laser
-                love.graphics.line(0, laser.y, dodgeGame.screen_width, laser.y)
-            else
-                -- Vertical laser
             love.graphics.line(laser.x, 0, laser.x, dodgeGame.screen_height)
-            end
             love.graphics.setLineWidth(1)
         end
     end
@@ -669,34 +496,13 @@ end
 function dodgeGame.checkLaserCollisions()
     for _, laser in ipairs(dodgeGame.lasers) do
         if laser.is_active then -- Only active lasers can hit
-            local hit = false
-            
-            if laser.is_horizontal then
-                -- Check collision with horizontal laser
-                if dodgeGame.player.y < laser.y + dodgeGame.laser_width/2 and
-                   dodgeGame.player.y + dodgeGame.player.height > laser.y - dodgeGame.laser_width/2 then
-                    hit = true
-                end
-            else
-                -- Check collision with vertical laser
+            -- Check collision with player (vertical laser only)
             if dodgeGame.player.x < laser.x + dodgeGame.laser_width/2 and
                dodgeGame.player.x + dodgeGame.player.width > laser.x - dodgeGame.laser_width/2 then
-                    hit = true
+                if not dodgeGame.player.is_invincible then
+                    dodgeGame.player_dropped = true
+                    debugConsole.addMessage("[DodgeGame] Player hit by laser!")
                 end
-            end
-            
-            if hit and not dodgeGame.player.is_invincible then
-                dodgeGame.player_dropped = true
-                -- Create particle explosion effect when player is hit
-                for i = 1, 20 do
-                    local angle = (i / 20) * math.pi * 2
-                    dodgeGame.createParticles(
-                        dodgeGame.player.x + dodgeGame.player.width/2,
-                        dodgeGame.player.y + dodgeGame.player.height/2,
-                        angle
-                    )
-                end
-                debugConsole.addMessage("[DodgeGame] Player hit by laser!")
             end
         end
     end
