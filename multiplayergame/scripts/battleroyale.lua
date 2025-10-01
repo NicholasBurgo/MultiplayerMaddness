@@ -50,7 +50,7 @@ battleRoyale.size_change_interval = 1.5 -- Change every 1.5 seconds
 battleRoyale.current_change_rate = 0 -- Current radius change rate
 battleRoyale.change_duration = 0 -- How long current change lasts
 
-battleRoyale.safe_zone_move_speed = 40 -- pixels per second (slower than player)
+battleRoyale.safe_zone_move_speed = 50 -- pixels per second
 battleRoyale.safe_zone_move_timer = 0
 battleRoyale.safe_zone_target_x = 400
 battleRoyale.safe_zone_target_y = 300
@@ -99,18 +99,11 @@ battleRoyale.safety_ring_colors = {
     {0.6, 0.3, 1.0}  -- Purple
 }
 battleRoyale.current_color_index = 1
-battleRoyale.safety_ring_directions = {
-    {1, 0},   -- Right
-    {1, 1},   -- Down-Right
-    {0, 1},   -- Down
-    {-1, 1},  -- Down-Left
-    {-1, 0},  -- Left
-    {-1, -1}, -- Up-Left
-    {0, -1},  -- Up
-    {1, -1}   -- Up-Right
-}
-battleRoyale.current_direction_index = 1
 battleRoyale.safe_zone_direction = {1, 0} -- Current movement direction
+battleRoyale.direction_angle = 0 -- Current direction angle in radians
+battleRoyale.target_x = 400 -- Target position to move towards
+battleRoyale.target_y = 300 -- Target position to move towards
+battleRoyale.target_reached_threshold = 20 -- Distance threshold to consider target reached
 battleRoyale.beat_count = 0 -- Track beats for synchronization
 
 -- Music asteroid color system
@@ -212,8 +205,10 @@ function battleRoyale.load()
     
     -- Reset music-synced variables
     battleRoyale.current_color_index = 1
-    battleRoyale.current_direction_index = 1
     battleRoyale.safe_zone_direction = {1, 0}
+    battleRoyale.direction_angle = 0
+    battleRoyale.target_x = 400
+    battleRoyale.target_y = 300
     battleRoyale.beat_count = 0
     battleRoyale.music_asteroid_color_index = 1
     battleRoyale.last_sync_time = 0
@@ -260,6 +255,51 @@ function battleRoyale.load()
     debugConsole.addMessage("[BattleRoyale] Game loaded")
 end
 
+-- Function to select a new target point on the opposite side of the screen
+function battleRoyale.selectNewTarget()
+    local current_x = battleRoyale.center_x
+    local current_y = battleRoyale.center_y
+    
+    -- Calculate which side of the screen we're currently on
+    local screen_center_x = battleRoyale.screen_width / 2
+    local screen_center_y = battleRoyale.screen_height / 2
+    
+    -- Determine opposite side based on current position
+    local target_x, target_y
+    
+    if current_x < screen_center_x then
+        -- Currently on left side, target right side
+        target_x = battleRoyale.random:random(screen_center_x + 100, battleRoyale.screen_width - 100)
+    else
+        -- Currently on right side, target left side
+        target_x = battleRoyale.random:random(100, screen_center_x - 100)
+    end
+    
+    if current_y < screen_center_y then
+        -- Currently on top side, target bottom side
+        target_y = battleRoyale.random:random(screen_center_y + 100, battleRoyale.screen_height - 100)
+    else
+        -- Currently on bottom side, target top side
+        target_y = battleRoyale.random:random(100, screen_center_y - 100)
+    end
+    
+    battleRoyale.target_x = target_x
+    battleRoyale.target_y = target_y
+    
+    -- Calculate direction towards target
+    local dx = target_x - current_x
+    local dy = target_y - current_y
+    local distance = math.sqrt(dx * dx + dy * dy)
+    
+    if distance > 0 then
+        battleRoyale.safe_zone_direction = {dx / distance, dy / distance}
+        battleRoyale.direction_angle = math.atan2(dy, dx)
+    end
+    
+    debugConsole.addMessage(string.format("[SafeZone] New target: (%.1f, %.1f), Direction: %.1f°", 
+        target_x, target_y, math.deg(battleRoyale.direction_angle)))
+end
+
 -- Handle beat events for music synchronization
 function battleRoyale.handleBeat()
     if not battleRoyale.game_started then return end
@@ -272,14 +312,8 @@ function battleRoyale.handleBeat()
         battleRoyale.current_color_index = 1
     end
     
-    -- Change direction every beat for faster movement
-    battleRoyale.current_direction_index = battleRoyale.current_direction_index + 1
-    if battleRoyale.current_direction_index > #battleRoyale.safety_ring_directions then
-        battleRoyale.current_direction_index = 1
-    end
-    
-    -- Update safe zone movement direction
-    battleRoyale.safe_zone_direction = battleRoyale.safety_ring_directions[battleRoyale.current_direction_index]
+    -- Select new target point on opposite side of screen
+    battleRoyale.selectNewTarget()
     
     -- Change music asteroid colors every beat
     battleRoyale.music_asteroid_color_index = battleRoyale.music_asteroid_color_index + 1
@@ -289,12 +323,12 @@ function battleRoyale.handleBeat()
     
     -- Calculate current speed multiplier for debug
     local base_speed = battleRoyale.safe_zone_move_speed
-    local raw_multiplier = 1.0 + (battleRoyale.beat_count * 0.05)
+    local raw_multiplier = 1.0 + (battleRoyale.beat_count * 0.075) -- Moderate acceleration rate
     local max_multiplier = battleRoyale.player.speed / base_speed
     local actual_multiplier = math.min(raw_multiplier, max_multiplier)
     
-    debugConsole.addMessage(string.format("[BattleRoyale] Beat %d - Border Color: %d, Direction: %d, Speed: %.1fx (capped at %.1fx)", 
-        battleRoyale.beat_count, battleRoyale.current_color_index, battleRoyale.current_direction_index, actual_multiplier, max_multiplier))
+    debugConsole.addMessage(string.format("[BattleRoyale] Beat %d - Border Color: %d, Target: (%.1f, %.1f), Speed: %.1fx (capped at %.1fx)", 
+        battleRoyale.beat_count, battleRoyale.current_color_index, battleRoyale.target_x, battleRoyale.target_y, actual_multiplier, max_multiplier))
 end
 
 function battleRoyale.setSeed(seed)
@@ -415,11 +449,21 @@ function battleRoyale.update(dt)
     
     -- Move safe zone - use interpolation for clients, direct movement for host
     if _G and _G.returnState == "hosting" then
-        -- Host: direct movement using music-synced direction
+        -- Check if we've reached the current target
+        local dx = battleRoyale.target_x - battleRoyale.center_x
+        local dy = battleRoyale.target_y - battleRoyale.center_y
+        local distance_to_target = math.sqrt(dx * dx + dy * dy)
+        
+        -- If we're close to the target, select a new one
+        if distance_to_target < battleRoyale.target_reached_threshold then
+            battleRoyale.selectNewTarget()
+        end
+        
+        -- Host: direct movement towards target
         local base_speed = battleRoyale.safe_zone_move_speed
-        local beat_speed_multiplier = 1.0 + (battleRoyale.beat_count * 0.05) -- Slower speed increase
+        local beat_speed_multiplier = 1.0 + (battleRoyale.beat_count * 0.075) -- Moderate acceleration rate
         -- Cap speed multiplier to ensure safe zone never moves faster than player (250 pixels/sec)
-        local max_multiplier = battleRoyale.player.speed / base_speed -- 250/40 = 6.25
+        local max_multiplier = battleRoyale.player.speed / base_speed -- 250/50 = 5.0
         beat_speed_multiplier = math.min(beat_speed_multiplier, max_multiplier)
         local move_speed = base_speed * beat_speed_multiplier * dt
         local move_x = battleRoyale.safe_zone_direction[1] * move_speed
@@ -1224,17 +1268,19 @@ function battleRoyale.sendGameStateSync()
     -- Only send sync from host
     if _G and _G.returnState == "hosting" and _G.serverClients then
         -- Compact message format for high-frequency updates
-        local message = string.format("bsync,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%.1f,%.1f,%d", 
+        local message = string.format("bsync,%.1f,%.1f,%.1f,%.1f,%d,%.3f,%d,%.1f,%.1f,%d,%.1f,%.1f", 
             battleRoyale.gameTime, 
             battleRoyale.center_x, 
             battleRoyale.center_y, 
             battleRoyale.safe_zone_radius,
             battleRoyale.current_color_index,
-            battleRoyale.current_direction_index,
+            battleRoyale.direction_angle,
             battleRoyale.beat_count,
             battleRoyale.current_change_rate,
             battleRoyale.change_duration,
-            battleRoyale.music_asteroid_color_index)
+            battleRoyale.music_asteroid_color_index,
+            battleRoyale.target_x,
+            battleRoyale.target_y)
         
         for _, client in ipairs(_G.serverClients) do
             -- Use the global safeSend function

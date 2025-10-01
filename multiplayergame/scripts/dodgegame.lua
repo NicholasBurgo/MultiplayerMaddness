@@ -26,8 +26,8 @@ dodgeGame.gameTime = 0
 dodgeGame.laserSpawnPoints = {}
 
 -- Game settings 
-dodgeGame.game_started = false
-dodgeGame.start_timer = 1 -- Reduced from 3 to 1 second
+dodgeGame.game_started = true
+dodgeGame.start_timer = 0 -- No start timer
 dodgeGame.timer = 30 -- 30 seconds
 dodgeGame.laser_tracking_time = 3.0 -- 2-4 seconds tracking time (randomized)
 dodgeGame.laser_duration = 0.25 -- 0.25 second active time (quarter of original)
@@ -65,8 +65,8 @@ function dodgeGame.load()
     -- Reset game state
     dodgeGame.game_over = false
     dodgeGame.current_round_score = 0
-    dodgeGame.game_started = false
-    dodgeGame.start_timer = 3
+    dodgeGame.game_started = true
+    dodgeGame.start_timer = 0
     dodgeGame.timer = 30 -- Reset timer to 30 seconds
     dodgeGame.gameTime = 0
     dodgeGame.next_laser_time = 0
@@ -208,11 +208,7 @@ function dodgeGame.update(dt)
     -- Update music effects
     musicHandler.update(dt)
     
-    if not dodgeGame.game_started then
-        dodgeGame.start_timer = math.max(0, dodgeGame.start_timer - dt)
-        dodgeGame.game_started = dodgeGame.start_timer == 0
-        return
-    end
+    -- Game starts immediately - no start timer needed
 
     -- Don't return early if game_over - allow respawning
     if dodgeGame.timer <= 0 then
@@ -410,10 +406,7 @@ function dodgeGame.drawUI(playersTable, localPlayerId)
         love.graphics.setColor(1, 1, 1)
     end
     
-    if not dodgeGame.game_started then
-        love.graphics.printf('Get Ready: ' .. math.ceil(dodgeGame.start_timer), 
-            0, dodgeGame.screen_height / 2 - 50, dodgeGame.screen_width, 'center')
-    end
+    -- No start timer display needed
     
     if dodgeGame.game_over then
         love.graphics.printf('Game Over - Round Complete!', 

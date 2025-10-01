@@ -10,12 +10,12 @@ local laserGame = require "scripts.lasergame"
 local battleRoyale = require "scripts.battleroyale"
 local dodgeGame = require "scripts.dodgegame"
 local raceGame = require "scripts.racegame"
-local fightGame = require "scripts.fightgame"
 local characterCustomization = require "scripts.charactercustom"
 local scoreLobby = require "scripts.scorelobby"
 local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 local instructions = require "scripts.instructions"
+local savefile = require "scripts.savefile"
 local returnState = "playing"
 local afterCustomization = nil
 local connectionAttempted = false
@@ -26,7 +26,16 @@ local server
 local peerToId = {}
 local connected = false
 local players = {}
-local localPlayer = {x = 100, y = 100, color = {1, 0, 0}, id = 0, totalScore = 0}
+local localPlayer = {x = 100, y = 100, color = {1, 0, 0}, id = 0, totalScore = 0, name = "Player"}
+
+-- Load saved player data
+function loadPlayerData()
+    local savedData = savefile.loadPlayerData()
+    localPlayer.name = savedData.name
+    localPlayer.color = savedData.color
+    localPlayer.facePoints = savedData.facePoints
+    debugConsole.addMessage("[Load] Loaded player data: " .. localPlayer.name)
+end
 local serverStatus = "Unknown"
 local nextClientId = 1
 local menuBackground = nil
@@ -50,12 +59,11 @@ local miniGameLineup = {
     "jumpgame",
     "lasergame", 
     "battleroyale",
-    "dodgegame",
-    "fightgame"
+    "dodgegame"
 }
 local currentGameIndex = 1
 
-local gameState = "menu"  -- Can be "menu", "connecting", "customization", "playing", or "hosting"
+local gameState = "menu"  -- Can be "menu", "play_menu", "settings_menu", "customize_menu", "connecting", "customization", "playing", or "hosting"
 local highScore = 0 -- this is high score for jumpgame
 local inputIP = "localhost"
 local inputPort = "12345"
@@ -400,8 +408,10 @@ function love.load() -- music effect
     print("[Main] Game loaded successfully!")
     players = {}
     debugConsole.init()
-    characterCustomization.init()
     love.keyboard.setKeyRepeat(true)
+    
+    -- Load saved player data
+    loadPlayerData()
     musicHandler.loadMenuMusic()
     instructions.load()
     battleRoyale.load()
@@ -418,15 +428,67 @@ function love.load() -- music effect
     titleGifAnim = anim8.newAnimation(g('1-5','1-4'), (60/musicHandler.bpm) / 8) 
 
     -- Create buttons
-    buttons.host = {x = 300, y = 150, width = 200, height = 50, text = "Host Game"}
-    buttons.join = {x = 300, y = 220, width = 200, height = 50, text = "Join Game"}
+    -- Main menu buttons
+    buttons.play = {x = 300, y = 230, width = 200, height = 50, text = "Play"}
+    buttons.customize = {x = 300, y = 300, width = 200, height = 50, text = "Customize"}
+    buttons.settings = {x = 300, y = 370, width = 200, height = 50, text = "Settings"}
+    buttons.quit = {x = 300, y = 440, width = 200, height = 50, text = "Quit"}
+    
+    -- Play submenu buttons
+    buttons.host = {x = 300, y = 230, width = 200, height = 50, text = "Host Game"}
+    buttons.join = {x = 300, y = 300, width = 200, height = 50, text = "Join Game"}
+    buttons.back_play = {x = 300, y = 370, width = 200, height = 50, text = "Back"}
+    
+    -- Settings submenu buttons
+    buttons.back_settings = {x = 300, y = 400, width = 200, height = 50, text = "Back"}
+    
+    -- Customize submenu buttons
+    buttons.back_customize = {x = 300, y = 400, width = 200, height = 50, text = "Back"}
+    
+    -- Other buttons
     buttons.start = {x = 300, y = 300, width = 200, height = 50, text = "Start", visible = false}
 
     -- Clear any existing effects first
     musicHandler.removeEffect("host_button")
     musicHandler.removeEffect("join_button")
+    musicHandler.removeEffect("play_button")
+    musicHandler.removeEffect("customize_button")
+    musicHandler.removeEffect("settings_button")
+    musicHandler.removeEffect("quit_button")
     musicHandler.removeEffect("menu_bg")
     musicHandler.removeEffect("title")
+
+    musicHandler.addEffect("play_button", "combo", {
+        scaleAmount = 0.1,      -- Pulse up to 20% bigger
+        rotateAmount = math.pi/64,  -- Small rotation
+        frequency = 1,          -- Once per beat
+        phase = 0,              -- Start of beat
+        snapDuration = 1.0    -- Quick snap
+    })
+
+    musicHandler.addEffect("customize_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.25,   -- Different timing
+        snapDuration = 1.0
+    })
+
+    musicHandler.addEffect("settings_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.5,   -- Different timing
+        snapDuration = 1.0
+    })
+
+    musicHandler.addEffect("quit_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.75,   -- Different timing
+        snapDuration = 1.0
+    })
 
     musicHandler.addEffect("host_button", "combo", {
         scaleAmount = 0.1,      -- Pulse up to 20% bigger
@@ -441,6 +503,30 @@ function love.load() -- music effect
         rotateAmount = math.pi/64,
         frequency = 1,
         phase = 0.5,   -- Opposite timing
+        snapDuration = 1.0
+    })
+
+    musicHandler.addEffect("back_play_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.125,   -- Different timing
+        snapDuration = 1.0
+    })
+
+    musicHandler.addEffect("back_settings_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.375,   -- Different timing
+        snapDuration = 1.0
+    })
+
+    musicHandler.addEffect("back_customize_button", "combo", {
+        scaleAmount = 0.1,
+        rotateAmount = math.pi/64,
+        frequency = 1,
+        phase = 0.625,   -- Different timing
         snapDuration = 1.0
     })
 
@@ -479,8 +565,6 @@ function love.update(dt)
         currentPartyGame = "battleroyale"
     elseif gameState == "dodgegame" then
         currentPartyGame = "dodgegame"
-    elseif gameState == "fightgame" then
-        currentPartyGame = "fightgame"
     end
 
     -- Check for party mode transition flag (host only)
@@ -558,23 +642,6 @@ function love.update(dt)
             for _, client in ipairs(serverClients) do
                 safeSend(client, "start_dodge_game," .. seed)
             end
-        elseif nextGame == "fightgame" then
-            gameState = "fightgame"
-            _G.returnState = returnState
-            _G.gameState = "fightgame"
-            _G.players = players
-            _G.localPlayer = localPlayer
-            initializeRoundWins()
-            
-            local seed = os.time() + love.timer.getTime() * 10000
-            fightGame.reset()
-            fightGame.setSeed(seed)
-            fightGame.setPlayerColor(localPlayer.color)
-            
-            -- Host notifies clients
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "start_fight_game," .. seed)
-            end
         end
         
         -- Send specific game transition to clients
@@ -594,12 +661,10 @@ function love.update(dt)
             currentPartyGame = "battleroyale"
         elseif gameState == "dodgegame" then
             currentPartyGame = "dodgegame"
-        elseif gameState == "fightgame" then
-            currentPartyGame = "fightgame"
         end
     end
 
-    if gameState == "menu" then
+    if gameState == "menu" or gameState == "play_menu" or gameState == "settings_menu" or gameState == "customize_menu" then
         titleGifAnim:update(dt)
     end
 
@@ -944,32 +1009,6 @@ function love.update(dt)
             dodgeGame.reset()
             partyModeTransitioned = false -- Reset for next game
         end
-    elseif gameState == "fightgame" then
-        if returnState == "hosting" then
-            if serverHost then
-                updateServer()
-            else
-                debugConsole.addMessage("[FightGame] Cannot update server - serverHost is nil")
-            end
-        else
-            updateClient()
-        end
-        
-        fightGame.update(dt)
-        
-        -- Check if game is over
-        if fightGame.game_over then
-            -- Only return to lobby if not in party mode
-            if not partyMode then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-            else
-                debugConsole.addMessage("Party mode active, staying in fight game state for next game")
-            end
-            
-            fightGame.reset()
-            partyModeTransitioned = false -- Reset for next game
-        end
     elseif gameState == "hosting" then
         updateServer()
     elseif gameState == "playing" or gameState == "connecting" then
@@ -1085,18 +1124,6 @@ function updateServer()
         end
     end
     
-    -- send fight game positions
-    if gameState == "fightgame" and serverHost then
-        local fightX = fightGame.player.x
-        local fightY = fightGame.player.y 
-        
-        -- Send position data
-        for _, client in ipairs(serverClients) do
-            safeSend(client, string.format("fight_position,0,%.2f,%.2f,%.2f,%.2f,%.2f",
-                fightX, fightY,
-                localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
-        end
-    end
     
 
     -- Handle network events
@@ -1118,7 +1145,8 @@ function updateServer()
                     x = 100, 
                     y = 100, 
                     id = clientId,
-                    color = {0, 0, 1}  -- Default blue color until client sends their color
+                    color = {0, 0, 1},  -- Default blue color until client sends their color
+                    name = "Player" .. clientId  -- Default name until client sends their name
                 }
                 
                 safeSend(event.peer, "your_id," .. clientId)
@@ -1126,9 +1154,10 @@ function updateServer()
                 -- Send existing players to new client
                 for id, player in pairs(players) do
                     -- Send position and color
-                    safeSend(event.peer, string.format("new_player,%d,%d,%d,%.2f,%.2f,%.2f",
+                    safeSend(event.peer, string.format("new_player,%d,%d,%d,%.2f,%.2f,%.2f,%s",
                         id, math.floor(player.x), math.floor(player.y),
-                        player.color[1], player.color[2], player.color[3]))
+                        player.color[1], player.color[2], player.color[3],
+                        player.name or "Player"))
                     
                     -- Send face data if it exists
                     if player.facePoints then
@@ -1258,16 +1287,6 @@ function updateClient()
             localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
         end
         
-        -- fight game positions
-        if gameState == "fightgame" then
-            local fightX = fightGame.player.x
-            local fightY = fightGame.player.y
-            
-            -- Send position data
-            safeSend(server, string.format("fight_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
-                localPlayer.id, fightX, fightY,
-                localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
-        end
         
     end
 end
@@ -1284,10 +1303,21 @@ function love.draw()
     elseif gameState == "dodgegame" then
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
-    elseif gameState == "fightgame" then
-        debugConsole.addMessage("[Draw] Drawing fight game")
-        fightGame.draw(players, localPlayer.id)
     elseif gameState == "menu" then
+        local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
+        local scale = 3
+        local frameWidth = 71 * scale
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
+        titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
+
+        drawButton(buttons.play, "play_button")
+        drawButton(buttons.customize, "customize_button")
+        drawButton(buttons.settings, "settings_button")
+        drawButton(buttons.quit, "quit_button")
+
+    elseif gameState == "play_menu" then
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
         local frameWidth = 71 * scale
@@ -1298,9 +1328,36 @@ function love.draw()
 
         drawButton(buttons.host, "host_button")
         drawButton(buttons.join, "join_button")
+        drawButton(buttons.back_play, "back_play_button")
 
-        love.graphics.setColor(1, 1, 1)  
-        love.graphics.printf("Server Status: " .. serverStatus, 0, 400, love.graphics.getWidth(), "center")
+    elseif gameState == "settings_menu" then
+        local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
+        local scale = 3
+        local frameWidth = 71 * scale
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
+        titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
+
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf("Settings", 0, 200, love.graphics.getWidth(), "center")
+        love.graphics.printf("Settings options coming soon!", 0, 250, love.graphics.getWidth(), "center")
+        
+        drawButton(buttons.back_settings, "back_settings_button")
+    elseif gameState == "customize_menu" then
+        local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
+        local scale = 3
+        local frameWidth = 71 * scale
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
+        titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
+
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf("Customize", 0, 200, love.graphics.getWidth(), "center")
+        love.graphics.printf("Character customization coming soon!", 0, 250, love.graphics.getWidth(), "center")
+        
+        drawButton(buttons.back_customize, "back_customize_button")
     elseif gameState == "customization" then
         characterCustomization.draw()
     elseif gameState == "connecting" then
@@ -1335,7 +1392,17 @@ function love.draw()
                     )
                 end
                 
-                -- Draw player score instead of ID
+                -- Draw player name above the player
+                love.graphics.setColor(1, 1, 1)  -- White color for name
+                love.graphics.printf(
+                    player.name or "Player",
+                    player.x - 30,
+                    player.y - 45,
+                    120,
+                    "center"
+                )
+                
+                -- Draw player score below the name
                 love.graphics.setColor(1, 1, 0)  -- Yellow color for score
                 love.graphics.printf(
                     "Score: " .. math.floor(player.totalScore or 0),
@@ -1429,22 +1496,87 @@ end
 function love.mousepressed(x, y, button)
     if button == 1 then  -- Left mouse button
         if gameState == "menu" then
+            if isMouseOver(buttons.play) then
+                gameState = "play_menu"
+            elseif isMouseOver(buttons.customize) then
+                gameState = "customization"
+                afterCustomization = "customize_only"
+                characterCustomization.initialize(localPlayer)
+                characterCustomization.init()
+            elseif isMouseOver(buttons.settings) then
+                gameState = "settings_menu"
+            elseif isMouseOver(buttons.quit) then
+                love.event.quit()
+            end
+        elseif gameState == "play_menu" then
             if isMouseOver(buttons.host) then
-                gameState = "customization"
-                afterCustomization = "host"
+                debugConsole.addMessage("[Play Menu] Starting host game")
+                startServer()
+                debugConsole.addMessage(string.format("[Play Menu] After startServer(), gameState = %s", gameState))
+                
+                -- If server creation failed, try a fallback approach
+                if not serverHost then
+                    debugConsole.addMessage("[Play Menu] Server creation failed, trying fallback")
+                    gameState = "hosting"
+                    connected = true
+                    localPlayer.id = 0
+                    players = {}
+                    players[localPlayer.id] = {
+                        x = localPlayer.x,
+                        y = localPlayer.y,
+                        color = localPlayer.color,
+                        id = localPlayer.id,
+                        facePoints = localPlayer.facePoints
+                    }
+                    debugConsole.addMessage("[Play Menu] Fallback hosting mode activated")
+                end
             elseif isMouseOver(buttons.join) then
-                gameState = "customization"
-                afterCustomization = "join"
+                debugConsole.addMessage("[Play Menu] Switching to connecting state")
+                gameState = "connecting"
+                buttons.start.visible = true
+            elseif isMouseOver(buttons.back_play) then
+                gameState = "menu"
+            end
+        elseif gameState == "settings_menu" then
+            if isMouseOver(buttons.back_settings) then
+                gameState = "menu"
+            end
+        elseif gameState == "customize_menu" then
+            if isMouseOver(buttons.back_customize) then
+                gameState = "menu"
             end
         elseif gameState == "customization" then
             local result = characterCustomization.mousepressed(x, y, button)
             debugConsole.addMessage(string.format("Customization result: %s", tostring(result)))
             if result == "confirm" then
-                -- Apply the selected color and face to localPlayer
+                -- Apply the selected color, face, and name to localPlayer
                 localPlayer.color = characterCustomization.getCurrentColor()
-                localPlayer.facePoints = characterCustomization.faceCanvas
-                debugConsole.addMessage("[Customization] Face saved successfully")
+                localPlayer.name = characterCustomization.getPlayerName()
+                
+                -- Get the face canvas and create a copy to avoid reference issues
+                local faceCanvas = characterCustomization.getFacePoints()
+                if faceCanvas then
+                    -- Create a new canvas and copy the content
+                    local newCanvas = love.graphics.newCanvas(100, 100)
+                    love.graphics.setCanvas(newCanvas)
+                    love.graphics.clear(0, 0, 0, 0)
+                    love.graphics.setColor(1, 1, 1, 1)
+                    love.graphics.draw(faceCanvas, 0, 0)
+                    love.graphics.setCanvas()
+                    localPlayer.facePoints = newCanvas
+                    print("[Customization] Created new canvas copy for localPlayer")
+                else
+                    localPlayer.facePoints = nil
+                    print("[Customization] No face canvas to copy")
+                end
+                
+                debugConsole.addMessage("[Customization] Character saved successfully")
+                debugConsole.addMessage(string.format("[Customization] Name: %s", localPlayer.name))
+                debugConsole.addMessage(string.format("[Customization] Face points type: %s", type(localPlayer.facePoints)))
                 debugConsole.addMessage(string.format("[Customization] afterCustomization = %s", tostring(afterCustomization)))
+                
+                -- Save player data to file
+                savefile.savePlayerData(localPlayer)
                 
                 -- Proceed with the stored action
                 if afterCustomization == "host" then
@@ -1472,7 +1604,13 @@ function love.mousepressed(x, y, button)
                     debugConsole.addMessage("[Customization] Switching to connecting state")
                     gameState = "connecting"
                     buttons.start.visible = true
+                elseif afterCustomization == "customize_only" then
+                    debugConsole.addMessage("[Customization] Returning to main menu")
+                    gameState = "menu"
                 end
+            elseif result == "cancel" then
+                debugConsole.addMessage("[Customization] Cancelled, returning to main menu")
+                gameState = "menu"
             end
         elseif gameState == "connecting" and isMouseOver(buttons.start) then
             startNetworking()
@@ -1485,14 +1623,19 @@ function love.mousepressed(x, y, button)
     
     -- Handle game-specific mouse input
     -- Battle royale uses spacebar for power-ups, not mouse
-    if gameState == "fightgame" then
-        fightGame.mousepressed(x, y, button)
-    end
 end
 
 function love.keypressed(key)
     print("[Main] Key pressed: " .. key .. " in gameState: " .. gameState)
     debugConsole.addMessage("[Main] Key pressed: " .. key .. " in gameState: " .. gameState)
+    
+    -- Handle customization keyboard input
+    if gameState == "customization" then
+        local handled = characterCustomization.keypressed(key)
+        if handled then
+            return
+        end
+    end
     
     if key == "f3" then  
         debugConsole.toggle()
@@ -1624,31 +1767,6 @@ function love.keypressed(key)
                     debugConsole.addMessage("[Host] Sent dodge game start to client")
                 end
             end)
-        elseif key == "5" then
-            -- Start fight game directly (no instructions for now)
-            -- Make sure server is properly initialized
-            if not serverHost then
-                debugConsole.addMessage("[FightGame] Server not initialized, cannot start fight game")
-                return
-            end
-            
-            gameState = "fightgame"
-            returnState = "hosting"
-            _G.returnState = "hosting"
-            _G.gameState = "fightgame"
-            _G.players = players
-            _G.localPlayer = localPlayer
-            initializeRoundWins()
-            
-            local seed = os.time() + love.timer.getTime() * 10000
-            fightGame.reset()
-            fightGame.setSeed(seed)
-            fightGame.setPlayerColor(localPlayer.color)
-            
-            -- Host notifies clients
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "start_fight_game," .. seed)
-            end
         end
     end
     if key == "p" then
@@ -1703,10 +1821,6 @@ function love.keypressed(key)
         battleRoyale.keypressed(key)
     end
     
-    -- Fight game spacebar and other keys
-    if gameState == "fightgame" then
-        fightGame.keypressed(key)
-    end
 end
 
 function love.textinput(t)
@@ -1776,7 +1890,8 @@ function startServer()
         y = localPlayer.y,
         color = localPlayer.color,
         id = localPlayer.id,
-        facePoints = characterCustomization.faceCanvas  -- Store the canvas directly for the host
+        facePoints = characterCustomization.getFacePoints(),  -- Store the canvas directly for the host
+        name = localPlayer.name
     }
     
     nextClientId = 1
@@ -1901,30 +2016,6 @@ function handleServerMessage(id, data)
         return
     end
     
-    -- Handle fight game positions
-    if data:match("fight_position,(%d+),") then
-        local parts = {}
-        for part in data:gmatch("([^,]+)") do
-            table.insert(parts, part)
-        end
-        
-        if #parts >= 7 then
-            local playerId = tonumber(parts[2])
-            local x = tonumber(parts[3])
-            local y = tonumber(parts[4])
-            local r = tonumber(parts[5])
-            local g = tonumber(parts[6])
-            local b = tonumber(parts[7])
-            
-            if not players[playerId] then
-                players[playerId] = {}
-            end
-            players[playerId].fightX = x
-            players[playerId].fightY = y
-            players[playerId].color = {r, g, b}
-        end
-        return
-    end
     
     -- Handle dodge game positions
     if data:match("dodge_position,(%d+),") then
@@ -2043,6 +2134,7 @@ function handleServerMessage(id, data)
         
         local existingFacePoints = players[id_from_msg] and players[id_from_msg].facePoints
         local existingScore = players[id_from_msg] and players[id_from_msg].totalScore or 0
+        local existingName = players[id_from_msg] and players[id_from_msg].name or "Player"
         
         if not players[id_from_msg] then
             players[id_from_msg] = {
@@ -2051,6 +2143,7 @@ function handleServerMessage(id, data)
                 color = {r, g, b}, 
                 id = id_from_msg,
                 totalScore = existingScore,
+                name = existingName,
                 facePoints = nil
             }
         else
@@ -2245,30 +2338,10 @@ function handleClientMessage(data)
         elseif nextGame == "dodgegame" then
             gameState = "dodgegame"
             -- Client will receive seed in start_dodge_game message
-        elseif nextGame == "fightgame" then
-            gameState = "fightgame"
-            -- Client will receive seed in start_fight_game message
         end
         return
     end
     
-    if data:match("^start_fight_game,") then
-        local seed = tonumber(data:match("^start_fight_game,(%d+)"))
-        debugConsole.addMessage("[Client] RECEIVED FIGHT GAME START MESSAGE with seed: " .. seed)
-        if seed then
-            gameState = "fightgame"
-            returnState = "playing"
-            _G.returnState = "playing"
-            _G.gameState = "fightgame"
-            _G.players = players
-            _G.localPlayer = localPlayer
-            fightGame.reset()
-            fightGame.setSeed(seed)
-            fightGame.setPlayerColor(localPlayer.color)
-            debugConsole.addMessage("[Client] Fight game loaded successfully with seed: " .. seed)
-        end
-        return
-    end
     
     if data == "show_battleroyale_instructions" then
         instructions.show("battleroyale", function() end)
@@ -2457,32 +2530,6 @@ function handleClientMessage(data)
         return
     end
     
-    if data:match("^fight_position,") then
-        -- Parse the message using comma delimiter like laser game
-        local parts = {}
-        for part in data:gmatch("([^,]+)") do
-            table.insert(parts, part)
-        end
-        
-        if #parts >= 7 then
-            local id = tonumber(parts[2])
-            local x = tonumber(parts[3])
-            local y = tonumber(parts[4])
-            local r = tonumber(parts[5])
-            local g = tonumber(parts[6])
-            local b = tonumber(parts[7])
-            
-            if id and id ~= localPlayer.id then
-                if not players[id] then
-                    players[id] = {}
-                end
-                players[id].fightX = x
-                players[id].fightY = y
-                players[id].color = {r, g, b}
-            end
-        end
-        return
-    end
 
     if data:match("^dodge_position,") then
         -- Parse the message using comma delimiter like laser game
@@ -2552,7 +2599,8 @@ function handleClientMessage(data)
             color = localPlayer.color,
             id = localPlayer.id,
             totalScore = localPlayer.totalScore,
-            facePoints = localPlayer.facePoints
+            facePoints = localPlayer.facePoints,
+            name = localPlayer.name
         }
         
         if server then
@@ -2574,6 +2622,25 @@ function handleClientMessage(data)
         end
         return
     end
+    
+    -- Handle new_player messages
+    if data:match("^new_player,") then
+        local id, x, y, r, g, b, name = data:match("new_player,(%d+),(%d+),(%d+),([%d.]+),([%d.]+),([%d.]+),(.+)")
+        if id and x and y and r and g and b and name then
+            id = tonumber(id)
+            if id ~= localPlayer.id then
+                players[id] = {
+                    x = tonumber(x),
+                    y = tonumber(y),
+                    color = {tonumber(r), tonumber(g), tonumber(b)},
+                    id = id,
+                    name = name
+                }
+                debugConsole.addMessage("[Client] Added new player " .. id .. " with name: " .. name)
+            end
+        end
+        return
+    end
 
     -- Handle regular position updates
     local id, x, y, r, g, b = data:match("(%d+),(%d+),(%d+),([%d.]+),([%d.]+),([%d.]+)")
@@ -2582,6 +2649,7 @@ function handleClientMessage(data)
         if id ~= localPlayer.id then
             local existingFacePoints = players[id] and players[id].facePoints
             local existingScore = players[id] and players[id].totalScore or 0
+            local existingName = players[id] and players[id].name or "Player"
             
             if not players[id] then
                 players[id] = {
@@ -2590,7 +2658,8 @@ function handleClientMessage(data)
                     color = {tonumber(r), tonumber(g), tonumber(b)},
                     id = id,
                     totalScore = existingScore,
-                    facePoints = nil
+                    facePoints = nil,
+                    name = existingName
                 }
             else
                 players[id].x = tonumber(x)
@@ -2850,6 +2919,9 @@ function deserializeFacePoints(str)
 end
 
 function love.quit()
+    -- Save player data before quitting
+    savefile.savePlayerData(localPlayer)
+    
     if characterCustomization.faceCanvas then
         characterCustomization.faceCanvas:release()
     end
