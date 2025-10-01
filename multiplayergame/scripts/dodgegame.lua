@@ -2,6 +2,14 @@ local dodgeGame = {}
 local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 
+-- Sound effects
+dodgeGame.sounds = {
+    laser = love.audio.newSource("sounds/laser.mp3", "static")
+}
+
+-- Set laser sound volume
+dodgeGame.sounds.laser:setVolume(0.2)
+
 -- Game state
 dodgeGame.game_over = false
 dodgeGame.current_round_score = 0
@@ -22,7 +30,7 @@ dodgeGame.game_started = false
 dodgeGame.start_timer = 1 -- Reduced from 3 to 1 second
 dodgeGame.timer = 30 -- 30 seconds
 dodgeGame.laser_tracking_time = 3.0 -- 2-4 seconds tracking time (randomized)
-dodgeGame.laser_duration = 1.0 -- 1 second active time
+dodgeGame.laser_duration = 0.25 -- 0.25 second active time (quarter of original)
 dodgeGame.laser_width = 24 -- Width of the laser beam (3x indicator width)
 dodgeGame.indicator_width = 8 -- Width of the tracking indicator
 dodgeGame.indicator_drag_speed = 0.3 -- How fast indicator follows player (0.1 = slow, 1.0 = instant)
@@ -59,6 +67,7 @@ function dodgeGame.load()
     dodgeGame.current_round_score = 0
     dodgeGame.game_started = false
     dodgeGame.start_timer = 3
+    dodgeGame.timer = 30 -- Reset timer to 30 seconds
     dodgeGame.gameTime = 0
     dodgeGame.next_laser_time = 0
     dodgeGame.lasers = {}
@@ -98,18 +107,94 @@ function dodgeGame.setSeed(seed)
     dodgeGame.gameTime = 0
     dodgeGame.laserSpawnPoints = {}
     
-    -- Pre-calculate laser spawn points
+    -- Determine when screen-splitter will appear (more frequent)
+    local screenSplitterTime = dodgeGame.random:random(5, 15) -- Between 5-15 seconds
+    local screenSplitterSpawned = false
+    
+    -- Pre-calculate laser spawn points with both types
     local time = 0
     while time < dodgeGame.timer do
+        local laserType
+        
+        -- Check if it's time for the screen-splitter (only once per game)
+        if not screenSplitterSpawned and time >= screenSplitterTime then
+            laserType = "screen_splitter"
+            screenSplitterSpawned = true
+        else
+            -- 50/50 chance between player and random
+            local rand = dodgeGame.random:random()
+            if rand < 0.5 then
+                laserType = "player"
+            else
+                laserType = "random"
+            end
+        end
+        
         local spawnInfo = {
             time = time,
-            target_player_id = 0, -- Will be set to random player when spawning
-            x = 0 -- Will be set to target player's x position when spawning
+            type = laserType,
+            spawn_x = dodgeGame.random:random(-100, dodgeGame.screen_width + 100), -- Can spawn off-screen
+            target_x = dodgeGame.random:random(50, dodgeGame.screen_width - 50) -- Where indicator moves to
         }
-        table.insert(dodgeGame.laserSpawnPoints, spawnInfo)
         
-        -- Spawn lasers every 3-5 seconds
-        time = time + dodgeGame.random:random(3, 5)
+        if laserType == "screen_splitter" then
+            -- Screen-splitter creates multiple lasers in sequence
+            spawnInfo.isPaired = false
+            spawnInfo.splitter_side = dodgeGame.random:random() < 0.5 and "left" or "right" -- Which side of screen
+            spawnInfo.warning_time = 4.0 -- Longer warning time
+            
+            -- Create multiple spawn points for the screen splitter sequence
+            local splitterWidth = dodgeGame.screen_width / 3
+            local numLasers = 8 -- Number of lasers in the sequence
+            local laserSpacing = splitterWidth / numLasers
+            
+            for i = 1, numLasers do
+                local splitterSpawn = {
+                    time = time + (i - 1) * 0.2, -- Stagger each laser by 0.2 seconds
+                    type = "screen_splitter",
+                    isPaired = false,
+                    splitter_side = spawnInfo.splitter_side,
+                    warning_time = 4.0,
+                    spawn_x = spawnInfo.splitter_side == "left" and (i - 1) * laserSpacing or 
+                             (dodgeGame.screen_width * 2/3) + (i - 1) * laserSpacing,
+                    target_x = spawnInfo.splitter_side == "left" and 
+                             (dodgeGame.screen_width / 2) - (numLasers - i) * laserSpacing or
+                             (dodgeGame.screen_width / 2) + (numLasers - i) * laserSpacing,
+                    splitter_index = i,
+                    splitter_total = numLasers
+                }
+                table.insert(dodgeGame.laserSpawnPoints, splitterSpawn)
+            end
+            
+            -- Skip the main spawn since we created multiple individual ones
+            -- (No need to add spawnInfo to the table)
+        elseif laserType == "random" then
+            -- Only random lasers get pairs (80% chance)
+            local isPaired = dodgeGame.random:random() < 0.8 -- 80% chance of being paired
+            spawnInfo.isPaired = isPaired
+            
+            if isPaired then
+                -- Add mirrored spawn info
+                spawnInfo.mirror_spawn_x = dodgeGame.screen_width - spawnInfo.spawn_x -- Mirror position
+                spawnInfo.mirror_target_x = dodgeGame.screen_width - spawnInfo.target_x -- Mirror target
+            end
+        else
+            spawnInfo.isPaired = false -- Following lasers never get pairs
+        end
+        
+        -- Only add to spawn points if not screen_splitter (already handled above)
+        if laserType ~= "screen_splitter" then
+            table.insert(dodgeGame.laserSpawnPoints, spawnInfo)
+        end
+        
+        -- Spawn lasers with beat timing, minimum 1.5 seconds between pairs
+        if laserType == "screen_splitter" then
+            time = time + 2.0 -- Only 2 seconds for screen-splitter (allows other lasers during prep)
+        elseif laserType == "random" and spawnInfo.isPaired then
+            time = time + math.max(1.5, musicHandler.beatInterval) -- Minimum 1.5 seconds for pairs
+        else
+            time = time + musicHandler.beatInterval -- Normal beat timing for singles
+        end
     end
     
     debugConsole.addMessage(string.format(
@@ -347,7 +432,7 @@ function dodgeGame.createStars()
             x = math.random(0, dodgeGame.screen_width),
             y = math.random(-dodgeGame.screen_height, dodgeGame.screen_height), -- Start above screen for smooth entry
             size = math.random(1, 3),
-            speed = math.random(60, 180) -- 3x faster movement speed (60-180 pixels per second)
+            speed = math.random(120, 360) -- 6x faster movement speed (120-360 pixels per second)
         })
     end
 end
@@ -396,8 +481,8 @@ function dodgeGame.updateLasers(dt)
         if laser.is_tracking then
             laser.tracking_time = laser.tracking_time - dt
             
-            -- Only follow player if we haven't reached the stop tracking time
-            if laser.tracking_time > laser.stop_tracking_time then
+            if laser.is_player_tracking then
+                -- Player-following laser behavior - move directly to player (no back and forth)
                 local targetX = 0
                 
                 -- Get target position
@@ -409,15 +494,24 @@ function dodgeGame.updateLasers(dt)
                     end
                 end
                 
-                -- Apply drag effect - indicator follows with delay
+                -- Move directly towards player position
                 local distance = targetX - laser.x
                 laser.x = laser.x + distance * dodgeGame.indicator_drag_speed * dt * 10
+            else
+                -- Random position laser behavior - move to target position
+                if laser.tracking_time > laser.stop_tracking_time and laser.target_x then
+                    -- Move indicator towards target position
+                    local distance = laser.target_x - laser.x
+                    laser.x = laser.x + distance * dodgeGame.indicator_drag_speed * dt * 10
+                end
             end
             
             -- Transition from tracking to active
             if laser.tracking_time <= 0 then
                 laser.is_tracking = false
                 laser.is_active = true
+                -- Play laser sound effect
+                dodgeGame.sounds.laser:clone():play()
             end
         elseif laser.is_active then
             laser.active_time = laser.active_time - dt
@@ -431,63 +525,81 @@ function dodgeGame.updateLasers(dt)
 end
 
 function dodgeGame.spawnLaserFromSpawnPoint(spawnInfo)
+    -- Spawn first laser
     local laser = {}
     
-    -- Select random target player (including local player)
-    local targetPlayerId = 0 -- Default to local player
-    if _G.players and _G.localPlayer then
-        local playerIds = {}
-        -- Add local player
-        table.insert(playerIds, _G.localPlayer.id or 0)
-        -- Add other players
-        for id, _ in pairs(_G.players) do
-            if id ~= (_G.localPlayer.id or 0) then
-                table.insert(playerIds, id)
-            end
-        end
-        
-        if #playerIds > 0 then
-            targetPlayerId = playerIds[dodgeGame.random:random(1, #playerIds)]
-        end
+    if spawnInfo.type == "player" then
+        -- Player-following laser - spawn from off-screen
+        laser.x = spawnInfo.spawn_x -- Start at spawn position (can be off-screen)
+        laser.y = dodgeGame.screen_height -- Start at bottom of screen
+        laser.target_player_id = 0 -- Default to local player
+        laser.tracking_time = dodgeGame.random:random(2, 4) -- 2-4 seconds tracking
+        laser.stop_tracking_time = 0 -- No stop tracking - move directly to player
+        laser.is_player_tracking = true
+        laser.is_screen_splitter = false
+    elseif spawnInfo.type == "screen_splitter" then
+        -- Screen-splitter laser - spawns multiple lasers in sequence moving to center
+        laser.x = spawnInfo.spawn_x -- Start at spawn position
+        laser.y = dodgeGame.screen_height -- Start at bottom of screen
+        laser.target_x = spawnInfo.target_x -- Target center of screen
+        laser.tracking_time = spawnInfo.warning_time -- 4 seconds warning
+        laser.stop_tracking_time = 1.0 -- Stop moving 1 second before firing
+        laser.is_player_tracking = false
+        laser.is_screen_splitter = true
+        laser.splitter_side = spawnInfo.splitter_side
+        laser.splitter_index = spawnInfo.splitter_index -- Which laser in the sequence
+        laser.splitter_total = spawnInfo.splitter_total -- Total lasers in sequence
+    else
+        -- Random position laser with moving indicator
+        laser.x = spawnInfo.spawn_x -- Start at spawn position
+        laser.y = dodgeGame.screen_height -- Start at bottom of screen
+        laser.target_x = spawnInfo.target_x -- Target position to move to
+        laser.tracking_time = dodgeGame.random:random(2, 4) -- 2-4 seconds to move and fire
+        laser.stop_tracking_time = 1.0 -- Stop moving 1 second before firing
+        laser.is_player_tracking = false
+        laser.is_screen_splitter = false
     end
     
-    -- Set initial position based on target
-    if targetPlayerId == (_G.localPlayer and _G.localPlayer.id or 0) then
-        laser.x = dodgeGame.player.x + dodgeGame.player.width / 2
-    else
-        -- Start at center, will be updated during tracking
-        laser.x = dodgeGame.screen_width / 2
-    end
-    laser.y = 0 -- Start at top of screen
-    laser.target_player_id = targetPlayerId
-    laser.tracking_time = dodgeGame.random:random(2, 4) -- 2-4 seconds tracking
-    laser.stop_tracking_time = 1.0 -- Stop tracking 1 second before firing
-    laser.active_time = dodgeGame.laser_duration -- 1 second active
+    laser.active_time = dodgeGame.laser_duration -- 0.25 second active
     laser.is_active = false
     laser.is_tracking = true
     
     table.insert(dodgeGame.lasers, laser)
+    
+    -- Spawn mirrored laser if paired (only for random lasers)
+    if spawnInfo.isPaired and spawnInfo.type == "random" then
+        local mirrorLaser = {}
+        
+        -- Random position mirror laser
+        mirrorLaser.x = spawnInfo.mirror_spawn_x -- Start at mirror spawn position
+        mirrorLaser.y = dodgeGame.screen_height -- Start at bottom of screen
+        mirrorLaser.target_x = spawnInfo.mirror_target_x -- Mirror target position
+        mirrorLaser.tracking_time = laser.tracking_time -- Same timing as first laser
+        mirrorLaser.stop_tracking_time = 1.0 -- Stop moving 1 second before firing
+        mirrorLaser.is_player_tracking = false
+        mirrorLaser.is_screen_splitter = false
+        
+        mirrorLaser.active_time = dodgeGame.laser_duration -- 0.25 second active
+        mirrorLaser.is_active = false
+        mirrorLaser.is_tracking = true
+        
+        table.insert(dodgeGame.lasers, mirrorLaser)
+    end
 end
 
 function dodgeGame.drawLasers()
     for _, laser in ipairs(dodgeGame.lasers) do
         if laser.is_tracking then
-            -- Draw tracking indicator (red line that follows player - matches laser game)
-            love.graphics.setColor(1, 0, 0, 0.3)
+            -- Draw tracking indicator (matches laser game warning color)
+            love.graphics.setColor(1, 0, 0, 0.3) -- Same as laser game warning
             love.graphics.setLineWidth(dodgeGame.indicator_width)
-            love.graphics.line(laser.x, 0, laser.x, dodgeGame.screen_height)
+            love.graphics.line(laser.x, dodgeGame.screen_height, laser.x, 0)
             love.graphics.setLineWidth(1)
-            
-            -- Draw target indicator at the bottom
-            love.graphics.setColor(1, 0, 0, 0.8)
-            love.graphics.circle('fill', laser.x, dodgeGame.screen_height - 20, 8)
-            love.graphics.setColor(1, 1, 1, 0.8)
-            love.graphics.circle('line', laser.x, dodgeGame.screen_height - 20, 8)
         elseif laser.is_active then
-            -- Draw active laser (red vertical line - matches laser game)
-            love.graphics.setColor(1, 0, 0, 0.8)
+            -- Draw active laser (matches laser game active color)
+            love.graphics.setColor(1, 0, 0, 0.8) -- Same as laser game active
             love.graphics.setLineWidth(dodgeGame.laser_width)
-            love.graphics.line(laser.x, 0, laser.x, dodgeGame.screen_height)
+            love.graphics.line(laser.x, dodgeGame.screen_height, laser.x, 0)
             love.graphics.setLineWidth(1)
         end
     end
@@ -496,12 +608,16 @@ end
 function dodgeGame.checkLaserCollisions()
     for _, laser in ipairs(dodgeGame.lasers) do
         if laser.is_active then -- Only active lasers can hit
-            -- Check collision with player (vertical laser only)
+            -- Check collision with laser (vertical laser only)
             if dodgeGame.player.x < laser.x + dodgeGame.laser_width/2 and
                dodgeGame.player.x + dodgeGame.player.width > laser.x - dodgeGame.laser_width/2 then
                 if not dodgeGame.player.is_invincible then
                     dodgeGame.player_dropped = true
-                    debugConsole.addMessage("[DodgeGame] Player hit by laser!")
+                    if laser.is_screen_splitter then
+                        debugConsole.addMessage("[DodgeGame] Player hit by screen-splitter!")
+                    else
+                        debugConsole.addMessage("[DodgeGame] Player hit by laser!")
+                    end
                 end
             end
         end
