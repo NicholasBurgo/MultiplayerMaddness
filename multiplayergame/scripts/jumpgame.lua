@@ -243,6 +243,12 @@ function jumpGame.update(dt) -- added music reaction
                 _G.players[_G.localPlayer.id].jumpScore = jumpGame.current_round_score
             end
             
+            -- Send score to server for winner determination
+            if _G.safeSend and _G.server then
+                _G.safeSend(_G.server, string.format("jump_score_sync,%d,%d", _G.localPlayer.id, jumpGame.current_round_score))
+                debugConsole.addMessage("[Jump] Sent score to server: " .. jumpGame.current_round_score)
+            end
+            
             _G.gameState = returnState
 
         end
