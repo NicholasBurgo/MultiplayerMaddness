@@ -3,6 +3,10 @@
 -- problem with only host being able to change colors.
 
 
+-- Steam Integration
+local steam_integration = require("scripts.steam.steam_integration")
+
+-- Legacy networking (ENet) - will be replaced by Steam networking
 local enet = require "enet"
 local anim8 = require "scripts.anim8"
 local jumpGame = require "scripts.jumpgame"
@@ -487,6 +491,11 @@ function awardRoundWin(playerId)
     end
     roundWins[playerId] = roundWins[playerId] + 1
     debugConsole.addMessage(string.format("[Round] Player %d wins round %d! Total wins: %d", playerId, currentRound, roundWins[playerId]))
+    
+    -- Trigger Steam achievements for local player
+    if playerId == localPlayer.id then
+        steam_integration.onGameWin("multiplayer", 0) -- Score not relevant for round wins
+    end
 end
 
 function checkForScoreDisplay()
@@ -1024,6 +1033,19 @@ function love.load() -- music effect
     debugConsole.init()
     love.keyboard.setKeyRepeat(true)
     
+    -- Initialize Steam integration
+    if steam_integration.init() then
+        debugConsole.addMessage("[Steam] Steam integration enabled")
+        -- Update player name from Steam if available
+        local steamName = steam_integration.getUserName()
+        if steamName and steamName ~= "Player" then
+            localPlayer.name = steamName
+            debugConsole.addMessage("[Steam] Using Steam name: " .. steamName)
+        end
+    else
+        debugConsole.addMessage("[Steam] Steam integration disabled, using fallback mode")
+    end
+    
     -- Load saved player data
     loadPlayerData()
     musicHandler.loadMenuMusic()
@@ -1165,6 +1187,10 @@ end
 
 function love.update(dt)
     -- print("[Main] Update running, gameState: " .. gameState) -- Uncomment this if needed
+    
+    -- Update Steam integration
+    steam_integration.update()
+    
     musicHandler.update(dt)
     instructions.update(dt)
     updateScoreDisplay(dt)
@@ -2959,6 +2985,10 @@ function startServer()
     connected = true
     serverStatus = "Running"
         debugConsole.addMessage("[Server] Server started with face data")
+    
+    -- Trigger Steam achievement for hosting a game
+    steam_integration.onHostGame()
+    
     debugConsole.addMessage(string.format("[Server] Final gameState = %s, connected = %s", gameState, tostring(connected)))
 end
 
@@ -3018,6 +3048,11 @@ function handleServerMessage(id, data)
                 players[id] = {totalScore = 0}
             end
             players[id].totalScore = math.floor((players[id].totalScore or 0) + score)
+            
+            -- Trigger Steam achievements for jump game
+            if data:match("^jump_score") and score >= 1000 then
+                steam_integration.onGameWin("jump", score)
+            end
             
             -- Broadcast updated score to all clients
             for _, client in ipairs(serverClients) do
@@ -3539,6 +3574,11 @@ function handleClientMessage(data)
             local previousScore = localPlayer.totalScore or 0
             -- Add new score
             localPlayer.totalScore = previousScore + score
+            
+            -- Trigger Steam achievements for jump game
+            if data:match("^jump_score") and score >= 1000 then
+                steam_integration.onGameWin("jump", score)
+            end
             
             -- Update player table to match
             if players[localPlayer.id] then
@@ -4143,6 +4183,9 @@ function deserializeFacePoints(str)
 end
 
 function love.quit()
+    -- Shutdown Steam integration
+    steam_integration.shutdown()
+    
     -- Save player data before quitting
     savefile.savePlayerData(localPlayer)
     
