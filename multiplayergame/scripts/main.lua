@@ -54,6 +54,234 @@ local showScoreDisplay = false
 local scoreDisplayTimer = 0
 local scoreDisplayDuration = 3 -- Show for 3 seconds
 
+-- Tab menu system
+local tabMenu = {
+    visible = false,
+    maxPlayers = 8,
+    tabHeld = false
+}
+
+-- Function to sort players by score then name
+local function sortPlayersForTab()
+    local sortedPlayers = {}
+    
+    -- Convert players table to array for sorting
+    for id, player in pairs(players) do
+        table.insert(sortedPlayers, {
+            id = id,
+            name = player.name or "Player",
+            totalScore = player.totalScore or 0
+        })
+    end
+    
+    -- Sort by score (descending) then by name (ascending)
+    table.sort(sortedPlayers, function(a, b)
+        if a.totalScore ~= b.totalScore then
+            return a.totalScore > b.totalScore
+        end
+        return a.name < b.name
+    end)
+    
+    return sortedPlayers
+end
+
+-- Function to get medal color for position
+local function getMedalColor(position)
+    if position == 1 then
+        return {1, 0.84, 0} -- Gold
+    elseif position == 2 then
+        return {0.75, 0.75, 0.75} -- Silver
+    elseif position == 3 then
+        return {0.8, 0.5, 0.2} -- Bronze
+    else
+        return {1, 1, 1} -- White
+    end
+end
+
+-- Function to get unique player name (adds suffix for duplicates)
+local function getUniquePlayerName(baseName, currentPlayerId)
+    -- Check if the base name is already taken by another player
+    local nameExists = false
+    for id, player in pairs(players) do
+        if id ~= currentPlayerId and player.name == baseName then
+            nameExists = true
+            break
+        end
+    end
+    
+    if not nameExists then
+        return baseName
+    end
+    
+    -- Find the next available suffix
+    local suffix = 2
+    local testName = baseName .. " - " .. suffix
+    
+    while true do
+        local nameTaken = false
+        for id, player in pairs(players) do
+            if id ~= currentPlayerId and player.name == testName then
+                nameTaken = true
+                break
+            end
+        end
+        
+        if not nameTaken then
+            return testName
+        end
+        
+        suffix = suffix + 1
+        testName = baseName .. " - " .. suffix
+    end
+end
+
+-- Function to draw voting panel showing all players and their votes
+local function drawVotingPanel()
+    -- Safety check - only draw if levelSelector is available
+    if not levelSelector then
+        debugConsole.addMessage("[VotingPanel] levelSelector not available")
+        return
+    end
+    
+    debugConsole.addMessage("[VotingPanel] Drawing voting panel - Player votes: " .. (levelSelector.playerVotes and #levelSelector.playerVotes or 0))
+    debugConsole.addMessage("[VotingPanel] Total players: " .. #table_keys(players))
+    for id, player in pairs(players) do
+        local votedLevel = levelSelector.playerVotes and levelSelector.playerVotes[id]
+        debugConsole.addMessage("[VotingPanel] Player " .. id .. " voted for: " .. tostring(votedLevel))
+    end
+    
+    local screenWidth = love.graphics.getWidth()
+    local screenHeight = love.graphics.getHeight()
+    local panelWidth = 400  -- Increased width for bigger icons
+    local panelHeight = 300  -- Increased height for bigger icons
+    local panelX = screenWidth - panelWidth - 20
+    local panelY = 80
+    
+    -- Panel background (more visible)
+    love.graphics.setColor(0.1, 0.1, 0.1, 0.9)
+    love.graphics.rectangle("fill", panelX, panelY, panelWidth, panelHeight)
+    love.graphics.setColor(0.5, 0.5, 0.5, 1)
+    love.graphics.setLineWidth(3)
+    love.graphics.rectangle("line", panelX, panelY, panelWidth, panelHeight)
+    love.graphics.setLineWidth(1)
+    
+    -- Panel title
+    love.graphics.setColor(0, 1, 0, 1)
+    love.graphics.setFont(love.graphics.newFont(16))
+    love.graphics.printf("VOTING STATUS", panelX, panelY + 10, panelWidth, "center")
+    
+    -- Draw players and their votes
+    local yOffset = 40
+    local lineHeight = 70  -- Much bigger for 60x60 icons
+    
+    for id, player in pairs(players) do
+        if player.name then
+            -- Player color indicator (MUCH bigger: 60x60)
+            love.graphics.setColor(player.color[1], player.color[2], player.color[3], 1)
+            love.graphics.rectangle("fill", panelX + 10, panelY + yOffset, 60, 60)
+            
+            -- Draw player face if available
+            if player.facePoints and type(player.facePoints) == "userdata" then
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.draw(
+                    player.facePoints,
+                    panelX + 10, panelY + yOffset,
+                    0,
+                    60/100, 60/100  -- Scale from 100x100 to 60x60
+                )
+            end
+            
+            -- Add a thick border to make the icon very visible
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.setLineWidth(4)
+            love.graphics.rectangle("line", panelX + 10, panelY + yOffset, 60, 60)
+            love.graphics.setLineWidth(1)
+            
+            -- Player name
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.setFont(love.graphics.newFont(16))
+            love.graphics.printf(player.name, panelX + 80, panelY + yOffset + 10, 150, "left")
+            
+            -- Show what they voted for
+            local votedLevel = levelSelector.playerVotes[id]
+            if votedLevel and levelSelector.levels[votedLevel] then
+                love.graphics.setColor(0.7, 0.7, 0.7, 1)
+                love.graphics.setFont(love.graphics.newFont(14))
+                love.graphics.printf("→ " .. levelSelector.levels[votedLevel].name, panelX + 80, panelY + yOffset + 30, 200, "left")
+            else
+                love.graphics.setColor(0.5, 0.5, 0.5, 1)
+                love.graphics.setFont(love.graphics.newFont(14))
+                love.graphics.printf("→ No vote", panelX + 80, panelY + yOffset + 30, 200, "left")
+            end
+            
+            yOffset = yOffset + lineHeight
+            
+            -- Stop if we're running out of space
+            if yOffset > panelHeight - 20 then
+                break
+            end
+        end
+    end
+end
+
+-- Function to draw tab menu
+local function drawTabMenu()
+    if not tabMenu.visible then return end
+    
+    local sortedPlayers = sortPlayersForTab()
+    local screenWidth = love.graphics.getWidth()
+    local screenHeight = love.graphics.getHeight()
+    
+    -- Draw semi-transparent background
+    love.graphics.setColor(0, 0, 0, 0.4)
+    love.graphics.rectangle("fill", 0, 0, screenWidth, screenHeight)
+    
+    -- Tab menu background
+    local menuWidth = 400
+    local menuHeight = math.min(#sortedPlayers * 50 + 60, tabMenu.maxPlayers * 50 + 60)
+    local menuX = (screenWidth - menuWidth) / 2
+    local menuY = (screenHeight - menuHeight) / 2
+    
+    love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
+    love.graphics.rectangle("fill", menuX, menuY, menuWidth, menuHeight)
+    love.graphics.setColor(0.3, 0.3, 0.3, 0.8)
+    love.graphics.rectangle("line", menuX, menuY, menuWidth, menuHeight)
+    
+    -- Title
+    love.graphics.setColor(1, 1, 1, 0.9)
+    love.graphics.setFont(love.graphics.newFont(24))
+    love.graphics.printf("Player List", menuX, menuY + 10, menuWidth, "center")
+    
+    -- Draw players (up to maxPlayers)
+    local startY = menuY + 50
+    local maxToShow = math.min(#sortedPlayers, tabMenu.maxPlayers)
+    
+    for i = 1, maxToShow do
+        local player = sortedPlayers[i]
+        local y = startY + (i - 1) * 45
+        local medalColor = getMedalColor(i)
+        
+        -- Player background
+        love.graphics.setColor(0.2, 0.2, 0.2, 0.3)
+        love.graphics.rectangle("fill", menuX + 10, y, menuWidth - 20, 40)
+        
+        -- Position number
+        love.graphics.setColor(medalColor[1], medalColor[2], medalColor[3], 0.9)
+        love.graphics.setFont(love.graphics.newFont(16))
+        love.graphics.printf("#" .. i, menuX + 15, y + 12, 50, "left")
+        
+        -- Player name
+        love.graphics.setColor(medalColor[1], medalColor[2], medalColor[3], 0.9)
+        love.graphics.setFont(love.graphics.newFont(18))
+        love.graphics.printf(player.name, menuX + 70, y + 10, 200, "left")
+        
+        -- Score
+        love.graphics.setColor(1, 1, 1, 0.9)
+        love.graphics.setFont(love.graphics.newFont(16))
+        love.graphics.printf("Score: " .. player.totalScore, menuX + 280, y + 12, 100, "right")
+    end
+end
+
 -- Mini game lineup system
 local miniGameLineup = {
     "jumpgame",
@@ -62,6 +290,79 @@ local miniGameLineup = {
     "dodgegame"
 }
 local currentGameIndex = 1
+
+-- Function to shuffle the game lineup
+local function shuffleGameLineup()
+    local shuffled = {}
+    local original = {}
+    
+    -- Copy the original lineup
+    for i = 1, #miniGameLineup do
+        original[i] = miniGameLineup[i]
+    end
+    
+    -- Fisher-Yates shuffle algorithm
+    for i = #original, 1, -1 do
+        local j = math.random(i)
+        shuffled[#shuffled + 1] = original[j]
+        original[j] = original[i]
+    end
+    
+    return shuffled
+end
+
+-- Game mode selection system
+local gameModeSelection = {
+    active = false,
+    selectedMode = 1, -- 1 = Level Selector, 2 = Party Mode
+    modes = {"Level Selector", "Party Mode"},
+    animationTime = 0
+}
+
+-- Level selector system
+local levelSelector = {
+    active = false,
+    selectedLevel = 1,
+    levels = {
+        {name = "Jump Game", description = "Platform jumping challenge", image = "images/jumpintro.png"},
+        {name = "Laser Game", description = "Dodge laser beams", image = "images/lasersintro.png"},
+        {name = "Battle Royale", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
+        {name = "Dodge Laser", description = "Quick reflex dodging", image = "images/menu-background.jpg"},
+        {name = "Race Game", description = "Standalone racing game", image = "images/raceintro.png"}
+    },
+    animationTime = 0,
+    votes = {}, -- Track votes: {levelIndex = {playerId1, playerId2, ...}}
+    playerVotes = {}, -- Track which level each player voted for: {playerId = levelIndex}
+    gridCols = 3, -- Number of columns in the grid
+    gridRows = 2, -- Number of rows in the grid (3x2 for 5 games + 1 empty space)
+    cardWidth = 200,
+    cardHeight = 140,
+    cardSpacing = 20,
+    loadedImages = {}, -- Cache for loaded images
+    lastSelectedGame = 1 -- Track the last selected actual game (not Run Game)
+}
+
+-- Function to load and cache level selector images
+local function loadLevelSelectorImages()
+    for i, level in ipairs(levelSelector.levels) do
+        if not levelSelector.loadedImages[i] then
+            local success, image = pcall(love.graphics.newImage, level.image)
+            if success then
+                levelSelector.loadedImages[i] = image
+                debugConsole.addMessage("[LevelSelector] Loaded image for " .. level.name)
+            else
+                -- Fallback to menu-background.jpg if image fails to load
+                local fallbackSuccess, fallbackImage = pcall(love.graphics.newImage, "images/menu-background.jpg")
+                if fallbackSuccess then
+                    levelSelector.loadedImages[i] = fallbackImage
+                    debugConsole.addMessage("[LevelSelector] Using fallback image for " .. level.name)
+                else
+                    debugConsole.addMessage("[LevelSelector] Failed to load image for " .. level.name)
+                end
+            end
+        end
+    end
+end
 
 local gameState = "menu"  -- Can be "menu", "play_menu", "settings_menu", "customize_menu", "connecting", "customization", "playing", or "hosting"
 local highScore = 0 -- this is high score for jumpgame
@@ -314,6 +615,240 @@ function drawScoreDisplay()
         0, love.graphics.getHeight() - 100, love.graphics.getWidth(), "center")
 end
 
+function drawGameModeSelection()
+    -- Semi-transparent overlay
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle('fill', 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    
+    -- Animated border with pulsing effect
+    local pulse = math.sin(gameModeSelection.animationTime * 3) * 0.2 + 0.8
+    love.graphics.setColor(0.2, 0.6, 1.0, pulse)
+    love.graphics.setLineWidth(6)
+    love.graphics.rectangle('line', 50, 50, love.graphics.getWidth() - 100, love.graphics.getHeight() - 100)
+    love.graphics.setLineWidth(1)
+    
+    -- Title with pulsing effect
+    local titlePulse = math.sin(gameModeSelection.animationTime * 2) * 0.3 + 0.7
+    love.graphics.setColor(1, 1, 0, titlePulse)
+    love.graphics.printf("SELECT GAME MODE", 
+        0, 100, love.graphics.getWidth(), "center")
+    
+    -- Subtitle
+    love.graphics.setColor(0.8, 0.8, 1, 1)
+    love.graphics.printf("Use W/S to navigate, SPACE to select", 
+        0, 140, love.graphics.getWidth(), "center")
+    
+    -- Game mode options
+    local centerY = love.graphics.getHeight() / 2
+    local optionSpacing = 80
+    
+    for i, mode in ipairs(gameModeSelection.modes) do
+        local y = centerY - 40 + (i - 1) * optionSpacing
+        local isSelected = i == gameModeSelection.selectedMode
+        
+        -- Background for selected option
+        if isSelected then
+            local bgPulse = math.sin(gameModeSelection.animationTime * 4 + i) * 0.1 + 0.9
+            love.graphics.setColor(0.1, 0.3, 0.6, 0.3 * bgPulse)
+            love.graphics.rectangle('fill', 200, y - 20, 400, 60)
+        end
+        
+        -- Option text
+        if isSelected then
+            love.graphics.setColor(1, 1, 0, 1) -- Yellow for selected
+        else
+            love.graphics.setColor(0.7, 0.7, 0.7, 1) -- Gray for unselected
+        end
+        
+        love.graphics.printf(mode, 0, y, love.graphics.getWidth(), "center")
+        
+        -- Selection indicator
+        if isSelected then
+            love.graphics.setColor(1, 1, 0, pulse)
+            love.graphics.printf(">>> " .. mode .. " <<<", 0, y, love.graphics.getWidth(), "center")
+        end
+    end
+    
+    -- Mode descriptions
+    love.graphics.setColor(0.6, 0.6, 1, 1)
+    if gameModeSelection.selectedMode == 1 then
+        love.graphics.printf("Choose specific levels to play", 
+            0, centerY + 120, love.graphics.getWidth(), "center")
+    elseif gameModeSelection.selectedMode == 2 then
+        love.graphics.printf("Random games in party mode", 
+            0, centerY + 120, love.graphics.getWidth(), "center")
+    end
+    
+    -- Instructions
+    love.graphics.setColor(0.8, 0.8, 1, 1)
+    love.graphics.printf("Press ESC to cancel", 
+        0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
+    
+    -- Draw voting panel in top right
+    drawVotingPanel()
+end
+
+function drawLevelSelector()
+    -- Load images if not already loaded
+    loadLevelSelectorImages()
+    
+    -- Debug vote data
+    debugConsole.addMessage("[LevelSelector] Drawing level selector - vote data:")
+    debugConsole.addMessage("[LevelSelector] levelSelector.votes exists: " .. tostring(levelSelector.votes ~= nil))
+    debugConsole.addMessage("[LevelSelector] levelSelector.playerVotes exists: " .. tostring(levelSelector.playerVotes ~= nil))
+    for levelIdx, voteList in pairs(levelSelector.votes) do
+        debugConsole.addMessage("[LevelSelector] Level " .. levelIdx .. " has " .. #voteList .. " votes")
+        for j, playerId in ipairs(voteList) do
+            debugConsole.addMessage("[LevelSelector] Level " .. levelIdx .. " vote " .. j .. ": player " .. playerId)
+        end
+    end
+    
+    -- Semi-transparent overlay
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle('fill', 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    
+    -- Animated border with pulsing effect
+    local pulse = math.sin(levelSelector.animationTime * 3) * 0.2 + 0.8
+    love.graphics.setColor(0.2, 0.8, 0.2, pulse)
+    love.graphics.setLineWidth(6)
+    love.graphics.rectangle('line', 50, 50, love.graphics.getWidth() - 100, love.graphics.getHeight() - 100)
+    love.graphics.setLineWidth(1)
+    
+    -- Title with pulsing effect
+    local titlePulse = math.sin(levelSelector.animationTime * 2) * 0.3 + 0.7
+    love.graphics.setColor(0, 1, 0, titlePulse)
+    love.graphics.printf("SELECT LEVEL", 
+        0, 80, love.graphics.getWidth(), "center")
+    
+    -- Subtitle with different instructions for host vs client
+    love.graphics.setColor(0.8, 1, 0.8, 1)
+    if gameState == "hosting" then
+        love.graphics.printf("Use WASD to navigate, SPACE to vote, ENTER to launch", 
+            0, 120, love.graphics.getWidth(), "center")
+    else
+        love.graphics.printf("Use WASD to navigate, SPACE to vote", 
+            0, 120, love.graphics.getWidth(), "center")
+    end
+    
+    -- Calculate grid positioning
+    local totalGridWidth = levelSelector.gridCols * levelSelector.cardWidth + (levelSelector.gridCols - 1) * levelSelector.cardSpacing
+    local totalGridHeight = levelSelector.gridRows * levelSelector.cardHeight + (levelSelector.gridRows - 1) * levelSelector.cardSpacing
+    local startX = (love.graphics.getWidth() - totalGridWidth) / 2
+    local startY = 150
+    
+    -- Draw level cards in grid
+    for i, level in ipairs(levelSelector.levels) do
+        local row = math.floor((i - 1) / levelSelector.gridCols)
+        local col = (i - 1) % levelSelector.gridCols
+        local x = startX + col * (levelSelector.cardWidth + levelSelector.cardSpacing)
+        local y = startY + row * (levelSelector.cardHeight + levelSelector.cardSpacing)
+        local isSelected = i == levelSelector.selectedLevel
+        
+        -- Card background
+        if isSelected then
+            local bgPulse = math.sin(levelSelector.animationTime * 4 + i) * 0.1 + 0.9
+            love.graphics.setColor(0.1, 0.4, 0.1, 0.4 * bgPulse)
+        else
+            love.graphics.setColor(0.1, 0.1, 0.1, 0.3)
+        end
+        love.graphics.rectangle('fill', x, y, levelSelector.cardWidth, levelSelector.cardHeight)
+        
+        -- Card border
+        if isSelected then
+            love.graphics.setColor(0, 1, 0, pulse)
+            love.graphics.setLineWidth(3)
+        else
+            love.graphics.setColor(0.3, 0.3, 0.3, 1)
+            love.graphics.setLineWidth(1)
+        end
+        love.graphics.rectangle('line', x, y, levelSelector.cardWidth, levelSelector.cardHeight)
+        love.graphics.setLineWidth(1)
+        
+        -- Highlight most voted level (for host)
+        if gameState == "hosting" then
+            local maxVotes = 0
+            local mostVotedLevel = 1
+            for levelIdx, voteList in pairs(levelSelector.votes) do
+                if #voteList > maxVotes then
+                    maxVotes = #voteList
+                    mostVotedLevel = levelIdx
+                end
+            end
+            
+            if i == mostVotedLevel and maxVotes > 0 then
+                local highlightPulse = math.sin(levelSelector.animationTime * 6) * 0.1 + 0.9
+                love.graphics.setColor(0.2, 0.2, 0.6, 0.3 * highlightPulse)
+                love.graphics.rectangle('fill', x + 2, y + 2, levelSelector.cardWidth - 4, levelSelector.cardHeight - 4)
+            end
+        end
+        
+        -- Draw level image
+        local imageX = x + 8
+        local imageY = y + 8
+        local imageWidth = levelSelector.cardWidth - 16
+        local imageHeight = 60
+        
+        if levelSelector.loadedImages[i] then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(levelSelector.loadedImages[i], imageX, imageY, 0, 
+                imageWidth / levelSelector.loadedImages[i]:getWidth(), 
+                imageHeight / levelSelector.loadedImages[i]:getHeight())
+        end
+        
+        -- Level name
+        if isSelected then
+            love.graphics.setColor(0, 1, 0, 1) -- Green for selected
+        else
+            love.graphics.setColor(0.9, 0.9, 0.9, 1) -- Light gray for unselected
+        end
+        love.graphics.printf(level.name, x + 8, y + 78, levelSelector.cardWidth - 16, "center")
+        
+        -- Level description
+        love.graphics.setColor(0.7, 0.8, 0.7, 1)
+        love.graphics.printf(level.description, x + 8, y + 95, levelSelector.cardWidth - 16, "center")
+        
+        -- Show votes for this level
+        debugConsole.addMessage("[VoteDraw] Checking level " .. i .. " - votes[i] exists: " .. tostring(levelSelector.votes[i] ~= nil) .. ", count: " .. tostring(#(levelSelector.votes[i] or {})))
+        if levelSelector.votes[i] and #levelSelector.votes[i] > 0 then
+            debugConsole.addMessage("[VoteDraw] Drawing votes for level " .. i .. " - count: " .. #levelSelector.votes[i])
+            love.graphics.setColor(1, 1, 0, 1) -- Yellow for votes
+            debugConsole.addMessage("[VoteDraw] Set color to yellow, drawing text at x=" .. (x + 8) .. ", y=" .. (y + 115))
+            love.graphics.printf("Votes: " .. #levelSelector.votes[i], x + 8, y + 115, levelSelector.cardWidth - 16, "center")
+            debugConsole.addMessage("[VoteDraw] Level " .. i .. " has " .. #levelSelector.votes[i] .. " votes")
+            
+            -- Show player icons who voted (bigger version for grid - 4x size)
+            local iconSize = 20  -- 4x bigger than the original 5x5
+            local iconStartX = x + (levelSelector.cardWidth - (#levelSelector.votes[i] * iconSize)) / 2
+            for j, playerId in ipairs(levelSelector.votes[i]) do
+                debugConsole.addMessage("[VoteIconDraw] Drawing icon for player " .. playerId .. " on level " .. i .. " (j=" .. j .. ")")
+                if players[playerId] then
+                    debugConsole.addMessage("[VoteIconDraw] Player " .. playerId .. " exists, color: " .. tostring(players[playerId].color[1]) .. "," .. tostring(players[playerId].color[2]) .. "," .. tostring(players[playerId].color[3]))
+                    love.graphics.setColor(players[playerId].color[1], players[playerId].color[2], players[playerId].color[3])
+                    love.graphics.rectangle("fill", iconStartX + (j-1) * iconSize, y + 125, iconSize, iconSize)
+                    debugConsole.addMessage("[VoteIconDraw] Drew rectangle at x=" .. (iconStartX + (j-1) * iconSize) .. ", y=" .. (y + 125) .. ", size=" .. iconSize)
+                    
+                    -- Draw player face if available
+                    if players[playerId].facePoints and type(players[playerId].facePoints) == "userdata" then
+                        love.graphics.setColor(1, 1, 1, 1)
+                        love.graphics.draw(
+                            players[playerId].facePoints,
+                            iconStartX + (j-1) * iconSize, y + 125,
+                            0,
+                            iconSize/100, iconSize/100  -- Scale from 100x100 to iconSize x iconSize
+                        )
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Draw voting panel in top right
+    drawVotingPanel()
+    
+    -- Navigation instructions removed for cleaner look
+end
+
+
 function safeSend(peer, message)
     if peer and peer.send then
         local success, err = pcall(function()
@@ -555,6 +1090,17 @@ function love.update(dt)
     instructions.update(dt)
     updateScoreDisplay(dt)
     scoreLobby.update(dt)
+    
+    -- Update game mode selection animation
+    if gameModeSelection.active then
+        gameModeSelection.animationTime = gameModeSelection.animationTime + dt
+    end
+    
+    -- Update level selector animation
+    if levelSelector.active then
+        levelSelector.animationTime = levelSelector.animationTime + dt
+    end
+
 
     -- Track actual game transitions
     if gameState == "jumpgame" then
@@ -588,6 +1134,8 @@ function love.update(dt)
         local nextGame = miniGameLineup[currentGameIndex]
         currentPartyGame = nextGame
         debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
+        debugConsole.addMessage("[Party Mode] Current index: " .. currentGameIndex .. " of " .. #miniGameLineup)
+        debugConsole.addMessage("[Party Mode] Full lineup: " .. table.concat(miniGameLineup, ", "))
         
         -- Start the next game directly (no instructions in party mode transitions)
         if nextGame == "jumpgame" then
@@ -746,11 +1294,12 @@ function love.update(dt)
             if not _G.partyModeTransition then
                 gameState = returnState
                 debugConsole.addMessage("Returned to state: " .. gameState)
+                jumpGame.reset()
             else
                 debugConsole.addMessage("Party mode transition active, staying in jump game state")
+                -- Don't reset jumpGame here - let the transition logic handle it
             end
-            jumpGame.reset()
-            partyModeTransitioned = false -- Reset for next game
+            -- Don't reset partyModeTransitioned here - let the transition logic handle it
         end
     elseif gameState == "lasergame" then
         if returnState == "hosting" then
@@ -922,11 +1471,12 @@ function love.update(dt)
             if not partyMode then
                 gameState = returnState
                 debugConsole.addMessage("Returned to state: " .. gameState)
+                battleRoyale.reset()
             else
                 debugConsole.addMessage("Party mode active, staying in battle royale state for next game")
+                -- Don't reset battleRoyale here - let the transition logic handle it
             end
-            battleRoyale.reset()
-            partyModeTransitioned = false -- Reset for next game
+            -- Don't reset partyModeTransitioned here - let the transition logic handle it
         end
     elseif gameState == "dodgegame" then
         if returnState == "hosting" then
@@ -1003,11 +1553,82 @@ function love.update(dt)
             if not partyMode then
                 gameState = returnState
                 debugConsole.addMessage("Returned to state: " .. gameState)
+                dodgeGame.reset()
             else
                 debugConsole.addMessage("Party mode active, staying in dodge game state for next game")
+                -- Don't reset dodgeGame here - let the transition logic handle it
             end
-            dodgeGame.reset()
-            partyModeTransitioned = false -- Reset for next game
+            -- Don't reset partyModeTransitioned here - let the transition logic handle it
+        end
+    elseif gameState == "racegame" then
+        if returnState == "hosting" then
+            updateServer()
+        else
+            updateClient()
+        end
+
+        raceGame.update(dt)
+
+        if connected then
+            local message = string.format("race_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
+                localPlayer.id or 0,
+                raceGame.player.x,
+                raceGame.player.y,
+                localPlayer.color[1],
+                localPlayer.color[2],
+                localPlayer.color[3]
+            )
+            if returnState == "hosting" then
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, message)
+                end
+            else
+                safeSend(server, message)
+            end
+        end
+
+        if raceGame.game_over then
+            debugConsole.addMessage("Race game over, returning to state: " .. returnState)
+            
+            -- Award round win to player with highest score
+            local winnerId = localPlayer.id
+            local highestScore = raceGame.current_round_score
+            
+            -- Check all players for highest score
+            for id, player in pairs(players) do
+                if player.raceScore and player.raceScore > highestScore then
+                    highestScore = player.raceScore
+                    winnerId = id
+                end
+            end
+            
+            if winnerId and returnState == "hosting" and serverClients and #serverClients > 0 then
+                awardRoundWin(winnerId)
+                checkForScoreDisplay()
+                
+                -- Broadcast round win
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, string.format("round_win,%d", winnerId))
+                end
+            elseif winnerId and returnState == "playing" and server and connected then
+                safeSend(server, string.format("round_win,%d", winnerId))
+            end
+            
+            -- Only show score lobby after every 3 games
+            if currentRound % maxRounds == 0 then
+                debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
+                scoreLobby.show(currentRound, roundWins, players)
+            end
+            
+            -- Only return to lobby if not in party mode
+            if not partyMode then
+                gameState = returnState
+                debugConsole.addMessage("Returned to state: " .. gameState)
+                raceGame.reset()
+            else
+                debugConsole.addMessage("Party mode active, staying in race game state for next game")
+                -- Don't reset raceGame here - let the transition logic handle it
+            end
         end
     elseif gameState == "hosting" then
         updateServer()
@@ -1023,6 +1644,11 @@ end
 
 function updatePhysics(dt)
     if gameState == "hosting" or gameState == "playing" then
+        -- Don't allow player movement when any menu is active
+        if gameModeSelection.active or levelSelector.active then
+            return
+        end
+        
         local moved = false
         if love.keyboard.isDown('w') then
             localPlayer.y = localPlayer.y - 200 * dt
@@ -1043,13 +1669,15 @@ function updatePhysics(dt)
             -- Update local player's position in the players table while preserving all data
             local existingFacePoints = players[localPlayer.id] and players[localPlayer.id].facePoints
             local existingScore = players[localPlayer.id] and players[localPlayer.id].totalScore or 0
+            local existingName = players[localPlayer.id] and players[localPlayer.id].name or localPlayer.name
             players[localPlayer.id] = {
                 x = localPlayer.x,
                 y = localPlayer.y,
                 color = localPlayer.color,
                 id = localPlayer.id,
                 totalScore = existingScore,
-                facePoints = existingFacePoints or localPlayer.facePoints
+                facePoints = existingFacePoints or localPlayer.facePoints,
+                name = existingName
             }
         end
     end
@@ -1060,16 +1688,18 @@ function updateServer()
         debugConsole.addMessage("[Server] updateServer called but no serverHost!")
         return 
     end
-
+    
     -- sends positions and colors in lobby
     for _, client in ipairs(serverClients) do
-        safeSend(client, string.format("0,%d,%d,%.2f,%.2f,%.2f", 
+        local message = string.format("%d,%d,%d,%.2f,%.2f,%.2f", 
+            localPlayer.id,
             math.floor(localPlayer.x), 
             math.floor(localPlayer.y),
             localPlayer.color[1],
             localPlayer.color[2],
             localPlayer.color[3]
-        ))
+        )
+        safeSend(client, message)
     end
 
     -- send jump game positions
@@ -1173,7 +1803,10 @@ function updateServer()
             if event.peer then
                 local clientId = peerToId[event.peer]
                 if clientId then
+                    debugConsole.addMessage("[Server] Received message from client " .. clientId .. ": " .. event.data)
                     handleServerMessage(clientId, event.data)
+                else
+                    debugConsole.addMessage("[Server] Received message from unknown client: " .. event.data)
                 end
             end
         elseif event.type == "disconnect" then
@@ -1215,7 +1848,7 @@ function updateClient()
         while event do
             if event.type == "connect" then
                 connected = true
-                gameState = "playing"
+        gameState = "playing"
             elseif event.type == "receive" then
                 handleClientMessage(event.data)
             elseif event.type == "disconnect" then
@@ -1303,6 +1936,9 @@ function love.draw()
     elseif gameState == "dodgegame" then
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
+    elseif gameState == "racegame" then
+        debugConsole.addMessage("[Draw] Drawing race game")
+        raceGame.draw(players, localPlayer.id)
     elseif gameState == "menu" then
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
@@ -1415,10 +2051,21 @@ function love.draw()
             end
         end
         
-        if gameState ~= "instructions" then
-            love.graphics.setColor(1, 1, 0)
-            love.graphics.printf("(1) Jump Game, (2) Laser Game, (3) Battle Royale, (4) Dodge Laser, (5) Fight Game, (P) Party Mode", 
-                0, love.graphics.getHeight() - 30, love.graphics.getWidth(), "center")
+        -- Draw voting panel in main lobby (always visible when there are 2+ players)
+        if levelSelector and levelSelector.playerVotes and #table_keys(players) >= 2 then
+            drawVotingPanel()
+        end
+        
+        -- Draw game mode selection UI
+        if gameModeSelection.active then
+            drawGameModeSelection()
+        elseif levelSelector.active then
+            drawLevelSelector()
+        else
+            -- Show spacebar hint when not in game mode selection
+            love.graphics.setColor(0.8, 0.8, 1, 0.8)
+            love.graphics.printf("Press SPACE to select game mode", 
+                0, love.graphics.getHeight() - 60, love.graphics.getWidth(), "center")
         end
     end
 
@@ -1446,6 +2093,9 @@ function love.draw()
     
     -- Draw debug console last so it's always on top
     debugConsole.draw()
+    
+    -- Draw tab menu (always on top)
+    drawTabMenu()
 end
 
 function drawButton(button, effectId)
@@ -1521,13 +2171,19 @@ function love.mousepressed(x, y, button)
                     connected = true
                     localPlayer.id = 0
                     players = {}
+                    local uniqueName = getUniquePlayerName(localPlayer.name, localPlayer.id)
                     players[localPlayer.id] = {
                         x = localPlayer.x,
                         y = localPlayer.y,
                         color = localPlayer.color,
                         id = localPlayer.id,
-                        facePoints = localPlayer.facePoints
+                        facePoints = localPlayer.facePoints,
+                        name = uniqueName
                     }
+                    if uniqueName ~= localPlayer.name then
+                        localPlayer.name = uniqueName
+                        debugConsole.addMessage("[Server] Host name changed to: " .. uniqueName)
+                    end
                     debugConsole.addMessage("[Play Menu] Fallback hosting mode activated")
                 end
             elseif isMouseOver(buttons.join) then
@@ -1591,13 +2247,19 @@ function love.mousepressed(x, y, button)
                         connected = true
                         localPlayer.id = 0
                         players = {}
+                        local uniqueName = getUniquePlayerName(localPlayer.name, localPlayer.id)
                         players[localPlayer.id] = {
                             x = localPlayer.x,
                             y = localPlayer.y,
                             color = localPlayer.color,
                             id = localPlayer.id,
-                            facePoints = localPlayer.facePoints
+                            facePoints = localPlayer.facePoints,
+                            name = uniqueName
                         }
+                        if uniqueName ~= localPlayer.name then
+                            localPlayer.name = uniqueName
+                            debugConsole.addMessage("[Server] Host name changed to: " .. uniqueName)
+                        end
                         debugConsole.addMessage("[Customization] Fallback hosting mode activated")
                     end
                 elseif afterCustomization == "join" then
@@ -1642,6 +2304,21 @@ function love.keypressed(key)
         debugConsole.addMessage("[DEBUG] F3 pressed - console toggled!")
     end
 
+    -- Handle TAB key for tab menu (works anywhere in the game except menus)
+    if key == "tab" then
+        -- Don't show tab menu in menu states
+        if gameState == "menu" or gameState == "play_menu" or gameState == "settings_menu" or gameState == "customization" then
+            return
+        end
+        
+        if not tabMenu.tabHeld then
+            tabMenu.tabHeld = true
+            tabMenu.visible = true
+            debugConsole.addMessage("[TabMenu] Tab held - menu opened")
+        end
+        return
+    end
+
     if gameState == "connecting" and inputField.active then
         if key == "backspace" then
             inputField.text = inputField.text:sub(1, -2)
@@ -1650,156 +2327,510 @@ function love.keypressed(key)
 
 
     -- Handle spacebar specifically for battle royale
-    if gameState == "battleroyale" and key == " " then
+    if gameState == "battleroyale" and (key == " " or key == "space") then
         print("[Main] Spacebar detected in battle royale, calling battleRoyale.keypressed")
         debugConsole.addMessage("[Main] Spacebar detected in battle royale, calling battleRoyale.keypressed")
         battleRoyale.keypressed(key)
         return
     end
 
-    -- Only allow host to start games
-    if key == "1" or key == "2" or key == "3" or key == "4" or key == "5" then
+    -- Handle spacebar for game mode selection in lobby
+    if (gameState == "playing" or gameState == "hosting") and (key == " " or key == "space") and not levelSelector.active then
+        debugConsole.addMessage("[GameMode] SPACEBAR in lobby - levelSelector.active=" .. tostring(levelSelector.active) .. ", gameModeSelection.active=" .. tostring(gameModeSelection.active))
+        if not gameModeSelection.active then
+            gameModeSelection.active = true
+            gameModeSelection.animationTime = 0
+            debugConsole.addMessage("[GameMode] Game mode selection activated")
+        else
+            -- Select the current mode
+            if gameModeSelection.selectedMode == 1 then
+                -- Level Selector mode
+                debugConsole.addMessage("[GameMode] Level Selector selected")
+                gameModeSelection.active = false
+                levelSelector.active = true
+                levelSelector.animationTime = 0
+                debugConsole.addMessage("[LevelSelector] Level selector activated - active=" .. tostring(levelSelector.active))
+                
+                -- Only reset votes if we're the host
+                if gameState == "hosting" then
+                    levelSelector.votes = {}
+                    levelSelector.playerVotes = {}
+                    debugConsole.addMessage("[LevelSelector] Host reset votes")
+                else
+                    -- Client: request current votes from server
+                    if server then
+                        safeSend(server, "request_votes," .. localPlayer.id)
+                        debugConsole.addMessage("[LevelSelector] Client requested current votes")
+                    end
+                end
+                
+                -- Initialize lastSelectedGame to first game
+                levelSelector.lastSelectedGame = 1
+            elseif gameModeSelection.selectedMode == 2 then
+                -- Party Mode
+                debugConsole.addMessage("[GameMode] Party Mode selected")
+                partyMode = true
+                _G.partyMode = partyMode
+                gameModeSelection.active = false
+                debugConsole.addMessage("[Party Mode] Enabled via game mode selection")
+                
+                -- Shuffle the game lineup for random order
+                miniGameLineup = shuffleGameLineup()
+                debugConsole.addMessage("[Party Mode] Game lineup shuffled: " .. table.concat(miniGameLineup, ", "))
+                
+                -- Start the first game in party mode (same as P key)
+                if gameState == "hosting" then
+                    currentGameIndex = 1  -- Reset game index to start from beginning
+                    local firstGame = miniGameLineup[1]
+                    currentPartyGame = firstGame
+                    partyModeTransitioned = false  -- Reset transition flag
+                    
+                    debugConsole.addMessage("[Party Mode] Starting first game: " .. firstGame)
+                    
+                    -- Start party music immediately
+                    musicHandler.loadPartyMusic()
+                    debugConsole.addMessage("[Party Mode] Starting party music")
+                    
+                    -- Notify clients that party mode has started
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_party_mode")
+                    end
+                    
+                    -- Start the first game directly from the shuffled lineup
+                    if firstGame == "jumpgame" then
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_jump_instructions")
+                        end
+                        
+                        instructions.show("jumpgame", function()
+                            -- Start party music only after the first instruction if in party mode
+                            if partyMode and isFirstPartyInstruction then
+                                musicHandler.loadPartyMusic()
+                                isFirstPartyInstruction = false  -- Clear the flag
+                                debugConsole.addMessage("[Party Mode] Starting music after first instruction")
+                            end
+
+                            gameState = "jumpgame"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            initializeRoundWins()
+                            jumpGame.reset(players)
+                            jumpGame.setPlayerColor(localPlayer.color)
+
+                            -- Only send game start after instructions
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_jump_game")
+                            end
+                        end)
+                    elseif firstGame == "lasergame" then
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_laser_instructions")
+                        end
+                        
+                        instructions.show("lasergame", function()
+                            gameState = "lasergame"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            initializeRoundWins()
+                            laserGame.load()
+                            laserGame.reset()
+                            laserGame.setPlayerColor(localPlayer.color)
+
+                            -- Only send game start after instructions
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_laser_game")
+                            end
+                        end)
+                    elseif firstGame == "battleroyale" then
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_battle_royale_instructions")
+                        end
+                        
+                        instructions.show("battleroyale", function()
+                            gameState = "battleroyale"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            initializeRoundWins()
+                            battleRoyale.load()
+                            battleRoyale.reset()
+                            battleRoyale.setPlayerColor(localPlayer.color)
+
+                            -- Only send game start after instructions
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_battle_royale")
+                            end
+                        end)
+                    elseif firstGame == "dodgegame" then
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_dodge_instructions")
+                        end
+                        
+                        instructions.show("dodgegame", function()
+                            gameState = "dodgegame"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            initializeRoundWins()
+                            dodgeGame.load()
+                            dodgeGame.setPlayerColor(localPlayer.color)
+                            local seed = math.random(1000000)
+                            dodgeGame.setSeed(seed)
+
+                            -- Only send game start after instructions
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_dodge_game," .. seed)
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+        return
+    end
+
+    -- Handle WASD keys for game mode selection
+    if gameModeSelection.active and (key == "w" or key == "s") then
+        if key == "w" then
+            gameModeSelection.selectedMode = gameModeSelection.selectedMode - 1
+            if gameModeSelection.selectedMode < 1 then
+                gameModeSelection.selectedMode = #gameModeSelection.modes
+            end
+        elseif key == "s" then
+            gameModeSelection.selectedMode = gameModeSelection.selectedMode + 1
+            if gameModeSelection.selectedMode > #gameModeSelection.modes then
+                gameModeSelection.selectedMode = 1
+            end
+        end
+        debugConsole.addMessage("[GameMode] Selected mode: " .. gameModeSelection.modes[gameModeSelection.selectedMode])
+        return
+    end
+
+    -- Handle ESC to cancel game mode selection
+    if gameModeSelection.active and key == "escape" then
+        gameModeSelection.active = false
+        debugConsole.addMessage("[GameMode] Game mode selection cancelled")
+        return
+    end
+
+    -- Handle level selector navigation with WASD (grid navigation)
+    if levelSelector.active and (key == "w" or key == "s" or key == "a" or key == "d") then
+        local currentRow = math.floor((levelSelector.selectedLevel - 1) / levelSelector.gridCols)
+        local currentCol = (levelSelector.selectedLevel - 1) % levelSelector.gridCols
+        
+        if key == "w" then
+            -- Move up
+            currentRow = currentRow - 1
+            if currentRow < 0 then
+                currentRow = levelSelector.gridRows - 1
+            end
+        elseif key == "s" then
+            -- Move down
+            currentRow = currentRow + 1
+            if currentRow >= levelSelector.gridRows then
+                currentRow = 0
+            end
+        elseif key == "a" then
+            -- Move left
+            currentCol = currentCol - 1
+            if currentCol < 0 then
+                currentCol = levelSelector.gridCols - 1
+            end
+        elseif key == "d" then
+            -- Move right
+            currentCol = currentCol + 1
+            if currentCol >= levelSelector.gridCols then
+                currentCol = 0
+            end
+        end
+        
+        -- Calculate new level index
+        levelSelector.selectedLevel = currentRow * levelSelector.gridCols + currentCol + 1
+        
+        -- Make sure we don't go out of bounds
+        if levelSelector.selectedLevel > #levelSelector.levels then
+            levelSelector.selectedLevel = #levelSelector.levels
+        end
+        
+        -- Update lastSelectedGame if we're selecting an actual game (not Race Game)
+        if levelSelector.selectedLevel <= 4 then
+            levelSelector.lastSelectedGame = levelSelector.selectedLevel
+            debugConsole.addMessage("[LevelSelector] Updated lastSelectedGame to: " .. levelSelector.selectedLevel .. " (" .. levelSelector.levels[levelSelector.selectedLevel].name .. ")")
+        end
+        
+        debugConsole.addMessage("[LevelSelector] Selected level: " .. levelSelector.levels[levelSelector.selectedLevel].name)
+        return
+    end
+
+    -- Handle level selection
+    if levelSelector.active and (key == " " or key == "space") then
+        local selectedLevel = levelSelector.levels[levelSelector.selectedLevel]
+        debugConsole.addMessage("[LevelSelector] SPACEBAR pressed - levelSelector.active=" .. tostring(levelSelector.active) .. ", gameState=" .. gameState)
+        
+        if gameState == "hosting" then
+            -- Host votes directly (no need to send to server)
+            debugConsole.addMessage("[LevelSelector] Host voting for level: " .. selectedLevel.name)
+            
+            if levelSelector.selectedLevel == 5 then
+                debugConsole.addMessage("[LevelSelector] Race Game is host-only, cannot vote for it")
+                return
+            end
+            
+            -- Host processes vote directly
+            local playerId = localPlayer.id
+            local levelIndex = levelSelector.selectedLevel
+            
+            -- Remove previous vote if exists
+            if levelSelector.playerVotes[playerId] then
+                local oldVote = levelSelector.playerVotes[playerId]
+                if levelSelector.votes[oldVote] then
+                    for i, pid in ipairs(levelSelector.votes[oldVote]) do
+                        if pid == playerId then
+                            table.remove(levelSelector.votes[oldVote], i)
+                            break
+                        end
+                    end
+                end
+            end
+            
+            -- Add new vote
+            levelSelector.playerVotes[playerId] = levelIndex
+            if not levelSelector.votes[levelIndex] then
+                levelSelector.votes[levelIndex] = {}
+            end
+            table.insert(levelSelector.votes[levelIndex], playerId)
+            
+            debugConsole.addMessage("[LevelSelector] Host voted for level " .. levelIndex .. " (" .. selectedLevel.name .. ")")
+            
+            -- Debug: Check vote data after host vote
+            debugConsole.addMessage("[HostVote] playerVotes[" .. playerId .. "] = " .. tostring(levelSelector.playerVotes[playerId]))
+            debugConsole.addMessage("[HostVote] votes[" .. levelIndex .. "] has " .. #levelSelector.votes[levelIndex] .. " votes")
+            for i, pid in ipairs(levelSelector.votes[levelIndex]) do
+                debugConsole.addMessage("[HostVote] votes[" .. levelIndex .. "][" .. i .. "] = " .. pid)
+            end
+            
+            -- Broadcast vote update to all clients
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "vote_update," .. levelIndex .. "," .. playerId)
+            end
+            
+        elseif gameState == "playing" then
+            -- Client votes for the level (but not for Run Game)
+            if levelSelector.selectedLevel == 5 then
+                debugConsole.addMessage("[LevelSelector] Race Game is host-only, cannot vote for it")
+                return
+            end
+            
+            debugConsole.addMessage("[LevelSelector] Client voting for level: " .. selectedLevel.name)
+            
+            -- Send vote to server
+            if server then
+                local voteMessage = "level_vote," .. levelSelector.selectedLevel .. "," .. localPlayer.id
+                debugConsole.addMessage("[Client] Sending vote message: " .. voteMessage)
+                safeSend(server, voteMessage)
+                debugConsole.addMessage("[Client] Vote message sent successfully")
+            else
+                debugConsole.addMessage("[Client] ERROR: No server connection!")
+            end
+        end
+        return
+    end
+    
+    -- TEST: Add a test vote with 't' key
+    if levelSelector.active and key == "t" then
+        debugConsole.addMessage("[TEST] Adding test vote for level " .. levelSelector.selectedLevel)
+        local playerId = localPlayer.id or 1
+        local levelIndex = levelSelector.selectedLevel
+        
+        -- Add test vote
+        if not levelSelector.votes[levelIndex] then
+            levelSelector.votes[levelIndex] = {}
+        end
+        table.insert(levelSelector.votes[levelIndex], playerId)
+        levelSelector.playerVotes[playerId] = levelIndex
+        
+        debugConsole.addMessage("[TEST] Added test vote - level " .. levelIndex .. " now has " .. #levelSelector.votes[levelIndex] .. " votes")
+        return
+    end
+    
+    -- Handle ENTER key for host to launch selected game
+    if levelSelector.active and key == "return" and gameState == "hosting" then
+        local selectedLevel = levelSelector.levels[levelSelector.selectedLevel]
+        debugConsole.addMessage("[LevelSelector] Host launching level: " .. selectedLevel.name)
+        levelSelector.active = false
+        
+        if levelSelector.selectedLevel == 1 then
+            gameState = "jumpgame"
+            jumpGame.load()
+            jumpGame.reset(players)
+            jumpGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Jump Game")
+            
+            -- Notify clients to start jump game
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_jump_game")
+            end
+        elseif levelSelector.selectedLevel == 2 then
+            gameState = "lasergame"
+            local seed = os.time() + love.timer.getTime() * 10000
+            laserGame.load()
+            laserGame.reset()
+            laserGame.setSeed(seed)
+            laserGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Laser Game")
+            
+            -- Notify clients to start laser game
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_laser_game," .. seed)
+            end
+        elseif levelSelector.selectedLevel == 3 then
+            gameState = "battleroyale"
+            local seed = os.time() + love.timer.getTime() * 10000
+            battleRoyale.load()
+            battleRoyale.reset()
+            battleRoyale.setSeed(seed)
+            battleRoyale.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Battle Royale")
+            
+            -- Notify clients to start battle royale
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_battleroyale_game," .. seed)
+            end
+        elseif levelSelector.selectedLevel == 4 then
+            gameState = "dodgegame"
+            local seed = os.time() + love.timer.getTime() * 10000
+            dodgeGame.load()
+            dodgeGame.reset()
+            dodgeGame.setSeed(seed)
+            dodgeGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Dodge Game")
+            
+            -- Notify clients to start dodge game
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_dodge_game," .. seed)
+            end
+        elseif levelSelector.selectedLevel == 5 then
+            -- Race Game option - launch the actual race game (standalone, not in party mode)
+            gameState = "racegame"
+            raceGame.load()
+            raceGame.reset()
+            raceGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Race Game (standalone)")
+            
+            -- Notify clients to start race game
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_race_game")
+            end
+        end
+        return
+    end
+
+    -- Handle ESC to cancel level selector
+    if levelSelector.active and key == "escape" then
+        levelSelector.active = false
+        debugConsole.addMessage("[LevelSelector] Level selector cancelled")
+        return
+    end
+
+    -- Handle '1' key for party mode (restored from P key functionality)
+    if key == "1" then
         if gameState ~= "hosting" then
             debugConsole.addMessage("[Game] Only the host can start games")
             return
         end
         
-        if key == "1" then
+        -- If in party mode, start the first game from the shuffled lineup
+        if partyMode then
+            currentGameIndex = 1  -- Reset game index to start from beginning
+            local firstGame = miniGameLineup[1]
+            debugConsole.addMessage("[Party Mode] Starting first game via '1' key: " .. firstGame)
+            
+            -- Start the first game in the party mode lineup
+            if firstGame == "jumpgame" then
+                -- Notify clients BEFORE showing host instructions
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "show_jump_instructions")
+                end
+                
+                instructions.show("jumpgame", function()
+                    -- Start party music only after the first instruction if in party mode
+                    if partyMode and isFirstPartyInstruction then
+                        musicHandler.loadPartyMusic()
+                        isFirstPartyInstruction = false  -- Clear the flag
+                        debugConsole.addMessage("[Party Mode] Starting music after first instruction")
+                    end
+
+                    gameState = "jumpgame"
+                    returnState = "hosting"
+                    _G.returnState = "hosting"
+                    initializeRoundWins()
+                    jumpGame.reset(players)
+                    jumpGame.setPlayerColor(localPlayer.color)
+
+                    -- Only send game start after instructions
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_jump_game")
+                        if partyMode and isFirstPartyInstruction then
+                            safeSend(client, "start_party_music")
+                        end
+                    end
+                end)
+            else
+                -- Handle other games in party mode lineup
+                debugConsole.addMessage("[Party Mode] Starting " .. firstGame .. " via '1' key")
+                -- The game transition logic will handle starting the appropriate game
+                gameState = firstGame
+                returnState = "hosting"
+                _G.returnState = "hosting"
+                initializeRoundWins()
+                
+                -- Start the appropriate game
+                if firstGame == "lasergame" then
+                    laserGame.load()
+                    laserGame.setPlayerColor(localPlayer.color)
+                    local seed = math.random(1000000)
+                    laserGame.setSeed(seed)
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_laser_game," .. seed)
+                    end
+                elseif firstGame == "battleroyale" then
+                    battleRoyale.load()
+                    battleRoyale.setPlayerColor(localPlayer.color)
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_battle_royale")
+                    end
+                elseif firstGame == "dodgegame" then
+                    dodgeGame.load()
+                    dodgeGame.setPlayerColor(localPlayer.color)
+                    local seed = math.random(1000000)
+                    dodgeGame.setSeed(seed)
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_dodge_game," .. seed)
+                    end
+                end
+            end
+        else
+            -- Not in party mode - start jump game normally
             -- Notify clients BEFORE showing host instructions
             for _, client in ipairs(serverClients) do
                 safeSend(client, "show_jump_instructions")
             end
             
             instructions.show("jumpgame", function()
-                -- Start party music only after the first instruction if in party mode
-                if partyMode and isFirstPartyInstruction then
-                    musicHandler.loadPartyMusic()
-                    isFirstPartyInstruction = false  -- Clear the flag
-                    debugConsole.addMessage("[Party Mode] Starting music after first instruction")
-                end
-        
                 gameState = "jumpgame"
                 returnState = "hosting"
                 _G.returnState = "hosting"
                 initializeRoundWins()
                 jumpGame.reset(players)
                 jumpGame.setPlayerColor(localPlayer.color)
-        
+
                 -- Only send game start after instructions
                 for _, client in ipairs(serverClients) do
                     safeSend(client, "start_jump_game")
-                    if partyMode and isFirstPartyInstruction then
-                        safeSend(client, "start_party_music")
-                    end
                 end
             end)
-        elseif key == "2" then
-            -- Notify clients BEFORE showing host instructions
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "show_laser_instructions")
-            end
-            
-            instructions.show("lasergame", function()
-                gameState = "lasergame"
-                returnState = "hosting"
-                initializeRoundWins()
-                local seed = os.time() + love.timer.getTime() * 10000
-                laserGame.reset()
-                laserGame.setSeed(seed)
-                laserGame.setPlayerColor(localPlayer.color)
-                
-                -- Only send game start after instructions
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, "start_laser_game," .. seed)
-                end
-            end)
-        elseif key == "3" then
-            -- Notify clients BEFORE showing host instructions
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "show_battleroyale_instructions")
-            end
-            
-            instructions.show("battleroyale", function()
-                print("[Main] Switching to battle royale mode!")
-                debugConsole.addMessage("[Main] Starting battle royale - party mode: " .. tostring(_G.partyMode))
-                gameState = "battleroyale"
-                returnState = "hosting"
-                _G.returnState = "hosting"
-                _G.gameState = "battleroyale"
-                _G.players = players
-                _G.localPlayer = localPlayer
-                initializeRoundWins()
-                local seed = os.time() + love.timer.getTime() * 10000
-                battleRoyale.reset()
-                battleRoyale.setSeed(seed)
-                battleRoyale.setPlayerColor(localPlayer.color)
-                
-                -- Only send game start after instructions
-                debugConsole.addMessage("[Host] Sending battle royale start to " .. #serverClients .. " clients")
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, "start_battleroyale_game," .. seed)
-                    debugConsole.addMessage("[Host] Sent battle royale start to client")
-                end
-            end)
-        elseif key == "4" then
-            -- Notify clients BEFORE showing host instructions
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "show_dodge_instructions")
-            end
-            
-            instructions.show("dodgegame", function()
-                gameState = "dodgegame"
-                returnState = "hosting"
-                _G.returnState = "hosting"
-                _G.gameState = "dodgegame"
-                _G.players = players
-                _G.localPlayer = localPlayer
-                initializeRoundWins()
-                local seed = os.time() + love.timer.getTime() * 10000
-                dodgeGame.reset()
-                dodgeGame.setSeed(seed)
-                dodgeGame.setPlayerColor(localPlayer.color)
-                
-                -- Only send game start after instructions
-                debugConsole.addMessage("[Host] Sending dodge game start to " .. #serverClients .. " clients")
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, "start_dodge_game," .. seed)
-                    debugConsole.addMessage("[Host] Sent dodge game start to client")
-                end
-            end)
-        end
-    end
-    if key == "p" then
-        if gameState == "hosting" then
-            partyMode = not partyMode
-            _G.partyMode = partyMode -- Update global reference
-            debugConsole.addMessage("[Party Mode] " .. (partyMode and "Enabled" or "Disabled"))
-            debugConsole.addMessage("[Party Mode] Global party mode set to: " .. tostring(_G.partyMode))
-            if partyMode then
-                isFirstPartyInstruction = true  -- Reset the flag when party mode starts
-                -- Start with jump game by simulating '1' key press
-                debugConsole.addMessage("[Party Mode] Starting initial Jump game")
-                currentPartyGame = nil  -- Reset this so we start fresh
-                currentGameIndex = 1    -- Reset game index to start from beginning
-                partyModeTransitioned = false -- Reset transition flag
-                
-                -- Notify clients that party mode has started
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, "start_party_mode")
-                end
-                
-                love.keypressed("1")    -- Start with jump game through instructions
-            else
-                -- Return to lobby when party mode is turned off
-                gameState = "hosting"
-                currentPartyGame = nil
-                musicHandler.stopMusic()  -- Only stop music when party mode ends
-                
-                -- Broadcast party mode end to clients
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, "end_party_mode")
-                end
-            end
         end
     end
 
@@ -1817,10 +2848,18 @@ function love.keypressed(key)
     end
 
     -- Battle royale spacebar handled above, other keys handled here
-    if gameState == "battleroyale" and key ~= " " then
+    if gameState == "battleroyale" and key ~= " " and key ~= "space" then
         battleRoyale.keypressed(key)
     end
-    
+end
+
+function love.keyreleased(key)
+    -- Handle TAB key release for tab menu
+    if key == "tab" then
+        tabMenu.tabHeld = false
+        tabMenu.visible = false
+        debugConsole.addMessage("[TabMenu] Tab released - menu closed")
+    end
 end
 
 function love.textinput(t)
@@ -1882,23 +2921,30 @@ function startServer()
     
     players = {}
     peerToId = {}
-    localPlayer.id = 0  -- Ensure host ID is set
-    
-    -- Create initial player entry with correct data
-    players[localPlayer.id] = {
-        x = localPlayer.x,
-        y = localPlayer.y,
-        color = localPlayer.color,
-        id = localPlayer.id,
-        facePoints = characterCustomization.getFacePoints(),  -- Store the canvas directly for the host
-        name = localPlayer.name
-    }
-    
+        localPlayer.id = 0  -- Ensure host ID is set
+        
+        -- Create initial player entry with correct data
+        local uniqueName = getUniquePlayerName(localPlayer.name, localPlayer.id)
+        players[localPlayer.id] = {
+            x = localPlayer.x,
+            y = localPlayer.y,
+            color = localPlayer.color,
+            id = localPlayer.id,
+            facePoints = characterCustomization.getFacePoints(),  -- Store the canvas directly for the host
+            name = uniqueName
+        }
+        
+        -- Update localPlayer name if it was changed
+        if uniqueName ~= localPlayer.name then
+            localPlayer.name = uniqueName
+            debugConsole.addMessage("[Server] Host name changed to: " .. uniqueName)
+        end
+        
     nextClientId = 1
-    gameState = "hosting"
+        gameState = "hosting"
     connected = true
     serverStatus = "Running"
-    debugConsole.addMessage("[Server] Server started with face data")
+        debugConsole.addMessage("[Server] Server started with face data")
     debugConsole.addMessage(string.format("[Server] Final gameState = %s, connected = %s", gameState, tostring(connected)))
 end
 
@@ -1919,19 +2965,23 @@ function startNetworking()
     end
     
     debugConsole.addMessage("[Client] Connection attempt sent...")
-    gameState = "connecting"
-    
-    -- Initialize local player with correct data
-    local savedColor = localPlayer.color
-    local savedFace = localPlayer.facePoints
-    localPlayer = {
-        x = 100,
-        y = 100,
-        color = savedColor,
-        facePoints = savedFace,  -- Preserve face data
-        id = nil
-    }
-    players = {}
+        gameState = "connecting"
+        
+        -- Initialize local player with correct data
+        local savedColor = localPlayer.color
+        local savedFace = localPlayer.facePoints
+        local savedName = localPlayer.name
+        local savedScore = localPlayer.totalScore
+        localPlayer = {
+            x = 100,
+            y = 100,
+            color = savedColor,
+            facePoints = savedFace,  -- Preserve face data
+            name = savedName,  -- Preserve name
+            totalScore = savedScore,  -- Preserve score
+            id = nil
+        }
+        players = {}
 end
 
 function handleDisconnection()
@@ -2152,6 +3202,7 @@ function handleServerMessage(id, data)
             players[id_from_msg].color = {r, g, b}
             players[id_from_msg].facePoints = existingFacePoints
             players[id_from_msg].totalScore = existingScore
+            players[id_from_msg].name = existingName  -- Preserve the existing name
         end
 
         for _, client in ipairs(serverClients) do
@@ -2247,6 +3298,81 @@ function handleServerMessage(id, data)
             for _, client in ipairs(serverClients) do
                 safeSend(client, data)
             end
+        end
+        return
+    end
+
+    -- Handle player name messages
+    if data:match("^player_name,") then
+        local playerId, playerName = data:match("player_name,(%d+),(.+)")
+        if playerId and playerName then
+            playerId = tonumber(playerId)
+            if players[playerId] then
+                -- Check for duplicate names and add suffix if needed
+                local finalName = getUniquePlayerName(playerName, playerId)
+                players[playerId].name = finalName
+                debugConsole.addMessage("[Server] Updated player " .. playerId .. " name to: " .. finalName)
+                
+                -- Broadcast name update to all clients
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "player_name_update," .. playerId .. "," .. finalName)
+                end
+            end
+        end
+        return
+    end
+
+    -- Handle vote requests from clients
+    if data:match("^request_votes,") then
+        local playerId = tonumber(data:match("request_votes,(%d+)"))
+        if playerId then
+            -- Send current votes to the requesting client
+            for levelIdx, voteList in pairs(levelSelector.votes) do
+                for _, voterId in ipairs(voteList) do
+                    safeSend(event.peer, "vote_update," .. levelIdx .. "," .. voterId)
+                end
+            end
+            debugConsole.addMessage("[Server] Sent current votes to player " .. playerId)
+        end
+        return
+    end
+
+    -- Handle level votes
+    if data:match("^level_vote,") then
+        debugConsole.addMessage("[Server] Received level_vote message: " .. data)
+        local levelIndex, playerId = data:match("level_vote,(%d+),(%d+)")
+        levelIndex = tonumber(levelIndex)
+        playerId = tonumber(playerId)
+        debugConsole.addMessage("[Server] Parsed level_vote - levelIndex: " .. tostring(levelIndex) .. ", playerId: " .. tostring(playerId))
+        
+        if levelIndex and playerId and levelIndex >= 1 and levelIndex <= #levelSelector.levels then
+            -- Remove previous vote if exists
+            if levelSelector.playerVotes[playerId] then
+                local oldVote = levelSelector.playerVotes[playerId]
+                if levelSelector.votes[oldVote] then
+                    for i, pid in ipairs(levelSelector.votes[oldVote]) do
+                        if pid == playerId then
+                            table.remove(levelSelector.votes[oldVote], i)
+                            break
+                        end
+                    end
+                end
+            end
+            
+            -- Add new vote
+            levelSelector.playerVotes[playerId] = levelIndex
+            if not levelSelector.votes[levelIndex] then
+                levelSelector.votes[levelIndex] = {}
+            end
+            table.insert(levelSelector.votes[levelIndex], playerId)
+            
+            debugConsole.addMessage("[Server] Player " .. playerId .. " voted for level " .. levelIndex .. " (" .. levelSelector.levels[levelIndex].name .. ")")
+            
+            -- Broadcast vote update to all clients
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "vote_update," .. levelIndex .. "," .. playerId)
+            end
+            
         end
         return
     end
@@ -2515,6 +3641,14 @@ function handleClientMessage(data)
         return
     end
     
+    if data == "start_race_game" then
+        gameState = "racegame"
+        returnState = "playing"
+        raceGame.load()
+        raceGame.setPlayerColor(localPlayer.color)
+        return
+    end
+    
     
     if data:match("^laser_position,") then
         local id, x, y, r, g, b = data:match("laser_position,(%d+),([-%d.]+),([-%d.]+),([%d.]+),([%d.]+),([%d.]+)")
@@ -2552,6 +3686,33 @@ function handleClientMessage(data)
                 end
                 players[id].dodgeX = x
                 players[id].dodgeY = y
+                players[id].color = {r, g, b}
+            end
+        end
+        return
+    end
+
+    if data:match("^race_position,") then
+        -- Parse the message using comma delimiter like laser game
+        local parts = {}
+        for part in data:gmatch("([^,]+)") do
+            table.insert(parts, part)
+        end
+        
+        if #parts >= 7 then
+            local id = tonumber(parts[2])
+            local x = tonumber(parts[3])
+            local y = tonumber(parts[4])
+            local r = tonumber(parts[5])
+            local g = tonumber(parts[6])
+            local b = tonumber(parts[7])
+            
+            if id and id ~= localPlayer.id then
+                if not players[id] then
+                    players[id] = {}
+                end
+                players[id].raceX = x
+                players[id].raceY = y
                 players[id].color = {r, g, b}
             end
         end
@@ -2612,6 +3773,10 @@ function handleClientMessage(data)
                 localPlayer.color[2],
                 localPlayer.color[3]))
             
+            -- Send player name
+            safeSend(server, "player_name," .. localPlayer.id .. "," .. localPlayer.name)
+            debugConsole.addMessage("[Client] Sent player name: " .. localPlayer.name)
+            
             if localPlayer.facePoints then
                 local serializedFace = serializeFacePoints(localPlayer.facePoints)
                 if serializedFace then
@@ -2667,6 +3832,7 @@ function handleClientMessage(data)
                 players[id].color = {tonumber(r), tonumber(g), tonumber(b)}
                 players[id].facePoints = existingFacePoints
                 players[id].totalScore = existingScore
+                players[id].name = existingName  -- Preserve the existing name
             end
         end
         return
@@ -2684,6 +3850,12 @@ function handleClientMessage(data)
     if data == "start_party_mode" then
         partyMode = true
         _G.partyMode = partyMode -- Update global reference
+        -- Shuffle the game lineup for random order (clients should match host)
+        miniGameLineup = shuffleGameLineup()
+        debugConsole.addMessage("[Client] Game lineup shuffled: " .. table.concat(miniGameLineup, ", "))
+        -- Start party music for client
+        musicHandler.loadPartyMusic()
+        debugConsole.addMessage("[Client] Starting party music")
         gameState = "jumpgame"
         currentPartyGame = "jumpgame"
         currentGameIndex = 1 -- Reset game index to match host
@@ -2793,6 +3965,51 @@ function handleClientMessage(data)
         if winnerId then
             awardRoundWin(winnerId)
             checkForScoreDisplay()
+        end
+        return
+    end
+
+    -- Handle player name update messages
+    if data:match("^player_name_update,") then
+        local playerId, playerName = data:match("player_name_update,(%d+),(.+)")
+        if playerId and playerName then
+            playerId = tonumber(playerId)
+            if players[playerId] then
+                players[playerId].name = playerName
+                debugConsole.addMessage("[Client] Updated player " .. playerId .. " name to: " .. playerName)
+            end
+        end
+        return
+    end
+
+    -- Handle vote updates
+    if data:match("^vote_update,") then
+        local levelIndex, playerId = data:match("vote_update,(%d+),(%d+)")
+        levelIndex = tonumber(levelIndex)
+        playerId = tonumber(playerId)
+        
+        if levelIndex and playerId and levelIndex >= 1 and levelIndex <= #levelSelector.levels then
+            -- Remove previous vote if exists
+            if levelSelector.playerVotes[playerId] then
+                local oldVote = levelSelector.playerVotes[playerId]
+                if levelSelector.votes[oldVote] then
+                    for i, pid in ipairs(levelSelector.votes[oldVote]) do
+                        if pid == playerId then
+                            table.remove(levelSelector.votes[oldVote], i)
+                            break
+                        end
+                    end
+                end
+            end
+            
+            -- Add new vote
+            levelSelector.playerVotes[playerId] = levelIndex
+            if not levelSelector.votes[levelIndex] then
+                levelSelector.votes[levelIndex] = {}
+            end
+            table.insert(levelSelector.votes[levelIndex], playerId)
+            
+            debugConsole.addMessage("[Client] Player " .. playerId .. " voted for level " .. levelIndex .. " (" .. levelSelector.levels[levelIndex].name .. ")")
         end
         return
     end

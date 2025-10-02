@@ -2,6 +2,14 @@ local battleRoyale = {}
 local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 
+-- Sound effects
+battleRoyale.sounds = {
+    death = love.audio.newSource("sounds/death.mp3", "static")
+}
+
+-- Set death sound volume
+battleRoyale.sounds.death:setVolume(0.3)
+
 -- Game state
 battleRoyale.game_over = false
 battleRoyale.current_round_score = 0
@@ -23,7 +31,7 @@ battleRoyale.safeZoneTargets = {}
 -- Game settings 
 battleRoyale.gravity = 1000
 battleRoyale.game_started = false
-battleRoyale.start_timer = 3
+battleRoyale.start_timer = 0
 battleRoyale.shrink_timer = 15
 battleRoyale.shrink_interval = 2
 battleRoyale.shrink_padding_x = 0
@@ -32,7 +40,7 @@ battleRoyale.max_shrink_padding_x = 300
 battleRoyale.max_shrink_padding_y = 200
 -- Use safe timer calculation with fallback for party mode
 local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
-battleRoyale.timer = beatInterval * 20 -- 40 seconds
+battleRoyale.timer = beatInterval * 12.5 -- 25 seconds (reduced by 15 seconds)
 battleRoyale.safe_zone_radius = 250 -- Start at max radius
 battleRoyale.center_x = 400
 battleRoyale.center_y = 300
@@ -57,7 +65,7 @@ battleRoyale.safe_zone_target_y = 300
 battleRoyale.sync_timer = 0
 battleRoyale.sync_interval = 1/60 -- Send sync every 1/60 seconds (60 times per second)
 battleRoyale.respawn_timer = 0 -- Timer for respawn mechanism
-battleRoyale.respawn_delay = 3 -- 3 seconds before respawn
+battleRoyale.respawn_delay = 1 -- 1 second before respawn
 
 -- Player settings
 battleRoyale.player = {
@@ -139,7 +147,7 @@ function battleRoyale.load()
     battleRoyale.player_dropped = false
     battleRoyale.death_animation_done = false
     battleRoyale.game_started = false
-    battleRoyale.start_timer = 3
+    battleRoyale.start_timer = 0
     battleRoyale.safe_zone_radius = 250 -- Start at max radius
     battleRoyale.size_change_timer = 0
     battleRoyale.current_change_rate = 0
@@ -151,7 +159,7 @@ function battleRoyale.load()
     battleRoyale.player.on_ground = false
     -- Use safe timer calculation with fallback for party mode
     local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
-    battleRoyale.timer = beatInterval * 20 -- 40 seconds
+    battleRoyale.timer = beatInterval * 12.5 -- 25 seconds (reduced by 15 seconds)
     battleRoyale.gameTime = 0
     debugConsole.addMessage("[BattleRoyale] Battle royale loaded successfully")
 
@@ -255,40 +263,19 @@ function battleRoyale.load()
     debugConsole.addMessage("[BattleRoyale] Game loaded")
 end
 
--- Function to select a new target point on the opposite side of the screen
+-- Function to select a new target point at random spots around the screen
 function battleRoyale.selectNewTarget()
-    local current_x = battleRoyale.center_x
-    local current_y = battleRoyale.center_y
-    
-    -- Calculate which side of the screen we're currently on
-    local screen_center_x = battleRoyale.screen_width / 2
-    local screen_center_y = battleRoyale.screen_height / 2
-    
-    -- Determine opposite side based on current position
-    local target_x, target_y
-    
-    if current_x < screen_center_x then
-        -- Currently on left side, target right side
-        target_x = battleRoyale.random:random(screen_center_x + 100, battleRoyale.screen_width - 100)
-    else
-        -- Currently on right side, target left side
-        target_x = battleRoyale.random:random(100, screen_center_x - 100)
-    end
-    
-    if current_y < screen_center_y then
-        -- Currently on top side, target bottom side
-        target_y = battleRoyale.random:random(screen_center_y + 100, battleRoyale.screen_height - 100)
-    else
-        -- Currently on bottom side, target top side
-        target_y = battleRoyale.random:random(100, screen_center_y - 100)
-    end
+    -- Move to completely random spots around the screen
+    local margin = 100 -- Keep some margin from screen edges
+    local target_x = battleRoyale.random:random(margin, battleRoyale.screen_width - margin)
+    local target_y = battleRoyale.random:random(margin, battleRoyale.screen_height - margin)
     
     battleRoyale.target_x = target_x
     battleRoyale.target_y = target_y
     
     -- Calculate direction towards target
-    local dx = target_x - current_x
-    local dy = target_y - current_y
+    local dx = target_x - battleRoyale.center_x
+    local dy = target_y - battleRoyale.center_y
     local distance = math.sqrt(dx * dx + dy * dy)
     
     if distance > 0 then
@@ -587,6 +574,7 @@ function battleRoyale.update(dt)
             battleRoyale.death_timer = 2 -- 2 second death animation
             battleRoyale.death_shake = 15 -- Shake intensity
             battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
+            battleRoyale.sounds.death:clone():play() -- Play death sound
             debugConsole.addMessage("[BattleRoyale] Player died outside safe zone! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
         end
     end
@@ -1229,6 +1217,7 @@ function battleRoyale.checkAsteroidCollisions()
                 battleRoyale.death_timer = 2 -- 2 second death animation
                 battleRoyale.death_shake = 15 -- Shake intensity
                 battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
+                battleRoyale.sounds.death:clone():play() -- Play death sound
                 debugConsole.addMessage("[BattleRoyale] Player hit by regular asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
             end
         end
@@ -1248,6 +1237,7 @@ function battleRoyale.checkAsteroidCollisions()
                 battleRoyale.death_timer = 2 -- 2 second death animation
                 battleRoyale.death_shake = 15 -- Shake intensity
                 battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
+                battleRoyale.sounds.death:clone():play() -- Play death sound
                 debugConsole.addMessage("[BattleRoyale] Player hit by music asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
             end
         end
