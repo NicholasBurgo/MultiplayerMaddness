@@ -357,6 +357,12 @@ function laserGame.update(dt)
             _G.players[_G.localPlayer.id].laserHits = laserGame.hitCount
         end
         
+        -- Send hit count to server for winner determination
+        if _G.safeSend and _G.server then
+            _G.safeSend(_G.server, string.format("laser_hits_sync,%d,%d", _G.localPlayer.id, laserGame.hitCount))
+            debugConsole.addMessage("[Laser] Sent hit count to server: " .. laserGame.hitCount)
+        end
+        
         if _G.returnState then
             _G.gameState = _G.returnState
         end
@@ -575,9 +581,9 @@ function laserGame.draw(playersTable, localPlayerId)
     love.graphics.printf(string.format("Time: %.1f", laserGame.timer), 
         0, 10, love.graphics.getWidth(), "center")
     
-    -- Draw current round score (as integer)
-    love.graphics.setColor(1, 1, 0)
-    love.graphics.printf(string.format("Round Score: %d", math.floor(laserGame.current_round_score)), 
+    -- Draw times hit display
+    love.graphics.setColor(1, 0.5, 0)
+    love.graphics.printf(string.format("Times Hit: %d", laserGame.hitCount), 
         0, 40, love.graphics.getWidth(), "center")
     
     -- If penalized, show penalty message
@@ -590,8 +596,8 @@ function laserGame.draw(playersTable, localPlayerId)
     
     if laserGame.game_over then
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf(string.format("Game Over!\nRound Score: %d", 
-            math.floor(laserGame.current_round_score)), 
+        love.graphics.printf(string.format("Game Over!\nTimes Hit: %d", 
+            laserGame.hitCount), 
             0, love.graphics.getHeight()/2 + 30, 
             love.graphics.getWidth(), "center")
     end

@@ -18,6 +18,7 @@ battleRoyale.screen_width = 800
 battleRoyale.screen_height = 600
 battleRoyale.camera_x = 0
 battleRoyale.camera_y = 0
+battleRoyale.death_count = 0
 
 -- Seed-based synchronization (like laser game)
 battleRoyale.seed = 0
@@ -142,6 +143,7 @@ function battleRoyale.load()
     -- Reset game state
     battleRoyale.game_over = false
     battleRoyale.current_round_score = 0
+    battleRoyale.death_count = 0
     battleRoyale.death_timer = 0
     battleRoyale.death_shake = 0
     battleRoyale.player_dropped = false
@@ -571,11 +573,12 @@ function battleRoyale.update(dt)
         
         if distance_from_center > radius and not battleRoyale.player.is_invincible and not battleRoyale.player_dropped then
             battleRoyale.player_dropped = true
+            battleRoyale.death_count = battleRoyale.death_count + 1 -- Increment death count
             battleRoyale.death_timer = 2 -- 2 second death animation
             battleRoyale.death_shake = 15 -- Shake intensity
             battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
             battleRoyale.sounds.death:clone():play() -- Play death sound
-            debugConsole.addMessage("[BattleRoyale] Player died outside safe zone! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
+            debugConsole.addMessage("[BattleRoyale] Player died outside safe zone! Death count: " .. battleRoyale.death_count .. ". Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
         end
     end
 
@@ -635,10 +638,17 @@ function battleRoyale.update(dt)
     -- Update scoring based on survival time
     battleRoyale.current_round_score = battleRoyale.current_round_score + math.floor(dt * 10)
     
-    -- Store score in players table for round win determination
-    if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-        _G.players[_G.localPlayer.id].battleScore = battleRoyale.current_round_score
-    end
+        -- Store death count in players table for round win determination (least deaths wins)
+        if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
+            _G.players[_G.localPlayer.id].battleDeaths = battleRoyale.death_count
+            _G.players[_G.localPlayer.id].battleScore = battleRoyale.current_round_score
+        end
+        
+        -- Send death count to server for winner determination
+        if _G.safeSend and _G.server then
+            _G.safeSend(_G.server, string.format("battle_deaths_sync,%d,%d", _G.localPlayer.id, battleRoyale.death_count))
+            debugConsole.addMessage("[Battle] Sent death count to server: " .. battleRoyale.death_count)
+        end
     
     -- Handle spacebar input using isDown (like jump game)
     battleRoyale.handleSpacebar()
@@ -1214,11 +1224,12 @@ function battleRoyale.checkAsteroidCollisions()
         }) then
             if not battleRoyale.player.is_invincible and not battleRoyale.player_dropped then
                 battleRoyale.player_dropped = true
+                battleRoyale.death_count = battleRoyale.death_count + 1 -- Increment death count
                 battleRoyale.death_timer = 2 -- 2 second death animation
                 battleRoyale.death_shake = 15 -- Shake intensity
                 battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
                 battleRoyale.sounds.death:clone():play() -- Play death sound
-                debugConsole.addMessage("[BattleRoyale] Player hit by regular asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
+                debugConsole.addMessage("[BattleRoyale] Player hit by regular asteroid! Death count: " .. battleRoyale.death_count .. ". Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
             end
         end
     end
@@ -1234,11 +1245,12 @@ function battleRoyale.checkAsteroidCollisions()
         }) then
             if not battleRoyale.player.is_invincible and not battleRoyale.player_dropped then
                 battleRoyale.player_dropped = true
+                battleRoyale.death_count = battleRoyale.death_count + 1 -- Increment death count
                 battleRoyale.death_timer = 2 -- 2 second death animation
                 battleRoyale.death_shake = 15 -- Shake intensity
                 battleRoyale.respawn_timer = battleRoyale.respawn_delay -- Start respawn timer
                 battleRoyale.sounds.death:clone():play() -- Play death sound
-                debugConsole.addMessage("[BattleRoyale] Player hit by music asteroid! Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
+                debugConsole.addMessage("[BattleRoyale] Player hit by music asteroid! Death count: " .. battleRoyale.death_count .. ". Respawning in " .. battleRoyale.respawn_delay .. " seconds...")
             end
         end
     end

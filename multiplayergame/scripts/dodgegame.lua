@@ -18,6 +18,7 @@ dodgeGame.screen_width = 800
 dodgeGame.screen_height = 600
 dodgeGame.camera_x = 0
 dodgeGame.camera_y = 0
+dodgeGame.death_count = 0
 
 -- Seed-based synchronization (like laser game)
 dodgeGame.seed = 0
@@ -65,6 +66,7 @@ function dodgeGame.load()
     -- Reset game state
     dodgeGame.game_over = false
     dodgeGame.current_round_score = 0
+    dodgeGame.death_count = 0
     dodgeGame.game_started = true
     dodgeGame.start_timer = 0
     dodgeGame.timer = 30 -- Reset timer to 30 seconds
@@ -269,10 +271,17 @@ function dodgeGame.update(dt)
     -- Update scoring based on survival time
     dodgeGame.current_round_score = dodgeGame.current_round_score + math.floor(dt * 10)
     
-    -- Store score in players table for round win determination
-    if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-        _G.players[_G.localPlayer.id].dodgeScore = dodgeGame.current_round_score
-    end
+        -- Store death count in players table for round win determination (least deaths wins)
+        if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
+            _G.players[_G.localPlayer.id].dodgeDeaths = dodgeGame.death_count
+            _G.players[_G.localPlayer.id].dodgeScore = dodgeGame.current_round_score
+        end
+        
+        -- Send death count to server for winner determination
+        if _G.safeSend and _G.server then
+            _G.safeSend(_G.server, string.format("dodge_deaths_sync,%d,%d", _G.localPlayer.id, dodgeGame.death_count))
+            debugConsole.addMessage("[Dodge] Sent death count to server: " .. dodgeGame.death_count)
+        end
 end
 
 function dodgeGame.draw(playersTable, localPlayerId)
@@ -606,10 +615,11 @@ function dodgeGame.checkLaserCollisions()
                dodgeGame.player.x + dodgeGame.player.width > laser.x - dodgeGame.laser_width/2 then
                 if not dodgeGame.player.is_invincible then
                     dodgeGame.player_dropped = true
+                    dodgeGame.death_count = dodgeGame.death_count + 1 -- Increment death count
                     if laser.is_screen_splitter then
-                        debugConsole.addMessage("[DodgeGame] Player hit by screen-splitter!")
+                        debugConsole.addMessage("[DodgeGame] Player hit by screen-splitter! Death count: " .. dodgeGame.death_count)
                     else
-                        debugConsole.addMessage("[DodgeGame] Player hit by laser!")
+                        debugConsole.addMessage("[DodgeGame] Player hit by laser! Death count: " .. dodgeGame.death_count)
                     end
                 end
             end
