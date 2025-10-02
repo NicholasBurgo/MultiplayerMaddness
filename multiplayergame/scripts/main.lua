@@ -9,7 +9,6 @@ local jumpGame = require "scripts.jumpgame"
 local laserGame = require "scripts.lasergame"
 local battleRoyale = require "scripts.battleroyale"
 local dodgeGame = require "scripts.dodgegame"
-local raceGame = require "scripts.racegame"
 local characterCustomization = require "scripts.charactercustom"
 local scoreLobby = require "scripts.scorelobby"
 local debugConsole = require "scripts.debugconsole"
@@ -204,10 +203,10 @@ local function drawVotingPanel()
             
             -- Show what they voted for
             local votedLevel = levelSelector.playerVotes[id]
-            if votedLevel and levelSelector.levels[votedLevel] then
+            if votedLevel and levelSelector.pages[levelSelector.currentPage] and levelSelector.pages[levelSelector.currentPage][votedLevel] then
                 love.graphics.setColor(0.7, 0.7, 0.7, 1)
                 love.graphics.setFont(love.graphics.newFont(14))
-                love.graphics.printf("→ " .. levelSelector.levels[votedLevel].name, panelX + 80, panelY + yOffset + 30, 200, "left")
+                love.graphics.printf("→ " .. levelSelector.pages[levelSelector.currentPage][votedLevel].name, panelX + 80, panelY + yOffset + 30, 200, "left")
             else
                 love.graphics.setColor(0.5, 0.5, 0.5, 1)
                 love.graphics.setFont(love.graphics.newFont(14))
@@ -323,18 +322,59 @@ local gameModeSelection = {
 local levelSelector = {
     active = false,
     selectedLevel = 1,
-    levels = {
-        {name = "Jump Game", description = "Platform jumping challenge", image = "images/jumpintro.png"},
-        {name = "Laser Game", description = "Dodge laser beams", image = "images/lasersintro.png"},
-        {name = "Battle Royale", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
-        {name = "Dodge Laser", description = "Quick reflex dodging", image = "images/menu-background.jpg"},
-        {name = "Race Game", description = "Standalone racing game", image = "images/raceintro.png"}
+    currentPage = 1,
+    pages = {
+        -- Page 1: Current games + Coming Soon
+        {
+            {name = "Jump Game", description = "Platform jumping challenge", image = "images/jumpintro.png"},
+            {name = "Laser Game", description = "Dodge laser beams", image = "images/lasersintro.png"},
+            {name = "Battle Royale", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
+            {name = "Dodge Laser", description = "Quick reflex dodging", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "New game mode in development", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Exciting content coming soon", image = "images/menu-background.jpg"}
+        },
+        -- Page 2: Racing Games
+        {
+            {name = "Coming Soon", description = "High-speed racing action", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Formula 1 style racing", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Off-road adventure racing", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Time trial challenges", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Multiplayer racing tournaments", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Custom track builder", image = "images/menu-background.jpg"}
+        },
+        -- Page 3: Puzzle Games
+        {
+            {name = "Coming Soon", description = "Mind-bending puzzle challenges", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Cooperative puzzle solving", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Speed puzzle competitions", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "3D puzzle adventures", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Logic puzzle master", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Creative puzzle designer", image = "images/menu-background.jpg"}
+        },
+        -- Page 4: Action Games
+        {
+            {name = "Coming Soon", description = "Epic action adventures", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Combat arena battles", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Stealth mission challenges", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Boss fight showdowns", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Power-up collection races", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Survival mode challenges", image = "images/menu-background.jpg"}
+        },
+        -- Page 5: Strategy Games
+        {
+            {name = "Coming Soon", description = "Strategic planning games", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Resource management challenges", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Tower defense battles", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Turn-based strategy", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Real-time strategy combat", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "Diplomatic negotiations", image = "images/menu-background.jpg"}
+        }
     },
     animationTime = 0,
     votes = {}, -- Track votes: {levelIndex = {playerId1, playerId2, ...}}
     playerVotes = {}, -- Track which level each player voted for: {playerId = levelIndex}
     gridCols = 3, -- Number of columns in the grid
-    gridRows = 2, -- Number of rows in the grid (3x2 for 5 games + 1 empty space)
+    gridRows = 2, -- Number of rows in the grid (3x2 for 6 games)
     cardWidth = 200,
     cardHeight = 140,
     cardSpacing = 20,
@@ -344,7 +384,8 @@ local levelSelector = {
 
 -- Function to load and cache level selector images
 local function loadLevelSelectorImages()
-    for i, level in ipairs(levelSelector.levels) do
+    local currentLevels = levelSelector.pages[levelSelector.currentPage]
+    for i, level in ipairs(currentLevels) do
         if not levelSelector.loadedImages[i] then
             local success, image = pcall(love.graphics.newImage, level.image)
             if success then
@@ -717,7 +758,17 @@ function drawLevelSelector()
     -- Title with pulsing effect
     local titlePulse = math.sin(levelSelector.animationTime * 2) * 0.3 + 0.7
     love.graphics.setColor(0, 1, 0, titlePulse)
-    love.graphics.printf("SELECT LEVEL", 
+    
+    -- Page-specific titles
+    local pageTitles = {
+        "SELECT LEVEL - Current Games",
+        "SELECT LEVEL - Racing Games", 
+        "SELECT LEVEL - Puzzle Games",
+        "SELECT LEVEL - Action Games",
+        "SELECT LEVEL - Strategy Games"
+    }
+    
+    love.graphics.printf(pageTitles[levelSelector.currentPage] or "SELECT LEVEL", 
         0, 80, love.graphics.getWidth(), "center")
     
     -- Subtitle with different instructions for host vs client
@@ -737,7 +788,8 @@ function drawLevelSelector()
     local startY = 150
     
     -- Draw level cards in grid
-    for i, level in ipairs(levelSelector.levels) do
+    local currentLevels = levelSelector.pages[levelSelector.currentPage]
+    for i, level in ipairs(currentLevels) do
         local row = math.floor((i - 1) / levelSelector.gridCols)
         local col = (i - 1) % levelSelector.gridCols
         local x = startX + col * (levelSelector.cardWidth + levelSelector.cardSpacing)
@@ -745,7 +797,10 @@ function drawLevelSelector()
         local isSelected = i == levelSelector.selectedLevel
         
         -- Card background
-        if isSelected then
+        if level.name == "Coming Soon" then
+            -- Special styling for Coming Soon levels
+            love.graphics.setColor(0.2, 0.2, 0.2, 0.5)
+        elseif isSelected then
             local bgPulse = math.sin(levelSelector.animationTime * 4 + i) * 0.1 + 0.9
             love.graphics.setColor(0.1, 0.4, 0.1, 0.4 * bgPulse)
         else
@@ -754,7 +809,11 @@ function drawLevelSelector()
         love.graphics.rectangle('fill', x, y, levelSelector.cardWidth, levelSelector.cardHeight)
         
         -- Card border
-        if isSelected then
+        if level.name == "Coming Soon" then
+            -- Special border for Coming Soon levels
+            love.graphics.setColor(0.5, 0.5, 0.5, 0.8)
+            love.graphics.setLineWidth(2)
+        elseif isSelected then
             love.graphics.setColor(0, 1, 0, pulse)
             love.graphics.setLineWidth(3)
         else
@@ -796,7 +855,9 @@ function drawLevelSelector()
         end
         
         -- Level name
-        if isSelected then
+        if level.name == "Coming Soon" then
+            love.graphics.setColor(0.5, 0.5, 0.5, 1) -- Dimmed gray for Coming Soon
+        elseif isSelected then
             love.graphics.setColor(0, 1, 0, 1) -- Green for selected
         else
             love.graphics.setColor(0.9, 0.9, 0.9, 1) -- Light gray for unselected
@@ -804,7 +865,11 @@ function drawLevelSelector()
         love.graphics.printf(level.name, x + 8, y + 78, levelSelector.cardWidth - 16, "center")
         
         -- Level description
-        love.graphics.setColor(0.7, 0.8, 0.7, 1)
+        if level.name == "Coming Soon" then
+            love.graphics.setColor(0.4, 0.4, 0.4, 1) -- Dimmed gray for Coming Soon descriptions
+        else
+            love.graphics.setColor(0.7, 0.8, 0.7, 1)
+        end
         love.graphics.printf(level.description, x + 8, y + 95, levelSelector.cardWidth - 16, "center")
         
         -- Show votes for this level
@@ -844,6 +909,20 @@ function drawLevelSelector()
     
     -- Draw voting panel in top right
     drawVotingPanel()
+    
+    -- Draw page navigation
+    local totalPages = #levelSelector.pages
+    local pageY = love.graphics.getHeight() - 60
+    
+    -- Page indicator
+    love.graphics.setColor(0.8, 0.8, 0.8, 1)
+    love.graphics.printf("Page " .. levelSelector.currentPage .. " of " .. totalPages, 
+        0, pageY, love.graphics.getWidth(), "center")
+    
+    -- Navigation instructions
+    love.graphics.setColor(0.6, 0.6, 0.6, 1)
+    love.graphics.printf("Q/E: Previous/Next Page | WASD: Navigate | SPACE: Vote", 
+        0, pageY + 20, love.graphics.getWidth(), "center")
     
     -- Navigation instructions removed for cleaner look
 end
@@ -1560,76 +1639,6 @@ function love.update(dt)
             end
             -- Don't reset partyModeTransitioned here - let the transition logic handle it
         end
-    elseif gameState == "racegame" then
-        if returnState == "hosting" then
-            updateServer()
-        else
-            updateClient()
-        end
-
-        raceGame.update(dt)
-
-        if connected then
-            local message = string.format("race_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
-                localPlayer.id or 0,
-                raceGame.player.x,
-                raceGame.player.y,
-                localPlayer.color[1],
-                localPlayer.color[2],
-                localPlayer.color[3]
-            )
-            if returnState == "hosting" then
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, message)
-                end
-            else
-                safeSend(server, message)
-            end
-        end
-
-        if raceGame.game_over then
-            debugConsole.addMessage("Race game over, returning to state: " .. returnState)
-            
-            -- Award round win to player with highest score
-            local winnerId = localPlayer.id
-            local highestScore = raceGame.current_round_score
-            
-            -- Check all players for highest score
-            for id, player in pairs(players) do
-                if player.raceScore and player.raceScore > highestScore then
-                    highestScore = player.raceScore
-                    winnerId = id
-                end
-            end
-            
-            if winnerId and returnState == "hosting" and serverClients and #serverClients > 0 then
-                awardRoundWin(winnerId)
-                checkForScoreDisplay()
-                
-                -- Broadcast round win
-                for _, client in ipairs(serverClients) do
-                    safeSend(client, string.format("round_win,%d", winnerId))
-                end
-            elseif winnerId and returnState == "playing" and server and connected then
-                safeSend(server, string.format("round_win,%d", winnerId))
-            end
-            
-            -- Only show score lobby after every 3 games
-            if currentRound % maxRounds == 0 then
-                debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
-                scoreLobby.show(currentRound, roundWins, players)
-            end
-            
-            -- Only return to lobby if not in party mode
-            if not partyMode then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-                raceGame.reset()
-            else
-                debugConsole.addMessage("Party mode active, staying in race game state for next game")
-                -- Don't reset raceGame here - let the transition logic handle it
-            end
-        end
     elseif gameState == "hosting" then
         updateServer()
     elseif gameState == "playing" or gameState == "connecting" then
@@ -1936,9 +1945,6 @@ function love.draw()
     elseif gameState == "dodgegame" then
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
-    elseif gameState == "racegame" then
-        debugConsole.addMessage("[Draw] Drawing race game")
-        raceGame.draw(players, localPlayer.id)
     elseif gameState == "menu" then
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
@@ -2515,6 +2521,30 @@ function love.keypressed(key)
         return
     end
 
+    -- Handle page navigation with Q/E keys
+    if levelSelector.active and (key == "q" or key == "e") then
+        if key == "q" then
+            -- Previous page
+            levelSelector.currentPage = levelSelector.currentPage - 1
+            if levelSelector.currentPage < 1 then
+                levelSelector.currentPage = #levelSelector.pages
+            end
+        elseif key == "e" then
+            -- Next page
+            levelSelector.currentPage = levelSelector.currentPage + 1
+            if levelSelector.currentPage > #levelSelector.pages then
+                levelSelector.currentPage = 1
+            end
+        end
+        
+        -- Reset selected level when changing pages
+        levelSelector.selectedLevel = 1
+        levelSelector.loadedImages = {} -- Clear cached images for new page
+        
+        debugConsole.addMessage("[LevelSelector] Switched to page " .. levelSelector.currentPage .. " of " .. #levelSelector.pages)
+        return
+    end
+
     -- Handle level selector navigation with WASD (grid navigation)
     if levelSelector.active and (key == "w" or key == "s" or key == "a" or key == "d") then
         local currentRow = math.floor((levelSelector.selectedLevel - 1) / levelSelector.gridCols)
@@ -2550,33 +2580,34 @@ function love.keypressed(key)
         levelSelector.selectedLevel = currentRow * levelSelector.gridCols + currentCol + 1
         
         -- Make sure we don't go out of bounds
-        if levelSelector.selectedLevel > #levelSelector.levels then
-            levelSelector.selectedLevel = #levelSelector.levels
+        if levelSelector.selectedLevel > #levelSelector.pages[levelSelector.currentPage] then
+            levelSelector.selectedLevel = #levelSelector.pages[levelSelector.currentPage]
         end
         
         -- Update lastSelectedGame if we're selecting an actual game (not Race Game)
         if levelSelector.selectedLevel <= 4 then
             levelSelector.lastSelectedGame = levelSelector.selectedLevel
-            debugConsole.addMessage("[LevelSelector] Updated lastSelectedGame to: " .. levelSelector.selectedLevel .. " (" .. levelSelector.levels[levelSelector.selectedLevel].name .. ")")
+            debugConsole.addMessage("[LevelSelector] Updated lastSelectedGame to: " .. levelSelector.selectedLevel .. " (" .. levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel].name .. ")")
         end
         
-        debugConsole.addMessage("[LevelSelector] Selected level: " .. levelSelector.levels[levelSelector.selectedLevel].name)
+        debugConsole.addMessage("[LevelSelector] Selected level: " .. levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel].name)
         return
     end
 
     -- Handle level selection
     if levelSelector.active and (key == " " or key == "space") then
-        local selectedLevel = levelSelector.levels[levelSelector.selectedLevel]
+        local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
         debugConsole.addMessage("[LevelSelector] SPACEBAR pressed - levelSelector.active=" .. tostring(levelSelector.active) .. ", gameState=" .. gameState)
+        
+        -- Prevent voting for "Coming Soon" levels
+        if selectedLevel.name == "Coming Soon" then
+            debugConsole.addMessage("[LevelSelector] Cannot vote for Coming Soon level")
+            return
+        end
         
         if gameState == "hosting" then
             -- Host votes directly (no need to send to server)
             debugConsole.addMessage("[LevelSelector] Host voting for level: " .. selectedLevel.name)
-            
-            if levelSelector.selectedLevel == 5 then
-                debugConsole.addMessage("[LevelSelector] Race Game is host-only, cannot vote for it")
-                return
-            end
             
             -- Host processes vote directly
             local playerId = localPlayer.id
@@ -2617,12 +2648,7 @@ function love.keypressed(key)
             end
             
         elseif gameState == "playing" then
-            -- Client votes for the level (but not for Run Game)
-            if levelSelector.selectedLevel == 5 then
-                debugConsole.addMessage("[LevelSelector] Race Game is host-only, cannot vote for it")
-                return
-            end
-            
+            -- Client votes for the level
             debugConsole.addMessage("[LevelSelector] Client voting for level: " .. selectedLevel.name)
             
             -- Send vote to server
@@ -2657,7 +2683,7 @@ function love.keypressed(key)
     
     -- Handle ENTER key for host to launch selected game
     if levelSelector.active and key == "return" and gameState == "hosting" then
-        local selectedLevel = levelSelector.levels[levelSelector.selectedLevel]
+        local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
         debugConsole.addMessage("[LevelSelector] Host launching level: " .. selectedLevel.name)
         levelSelector.active = false
         
@@ -2710,18 +2736,6 @@ function love.keypressed(key)
             -- Notify clients to start dodge game
             for _, client in ipairs(serverClients) do
                 safeSend(client, "start_dodge_game," .. seed)
-            end
-        elseif levelSelector.selectedLevel == 5 then
-            -- Race Game option - launch the actual race game (standalone, not in party mode)
-            gameState = "racegame"
-            raceGame.load()
-            raceGame.reset()
-            raceGame.setPlayerColor(localPlayer.color)
-            debugConsole.addMessage("[Game] Started Race Game (standalone)")
-            
-            -- Notify clients to start race game
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "start_race_game")
             end
         end
         return
@@ -3641,13 +3655,6 @@ function handleClientMessage(data)
         return
     end
     
-    if data == "start_race_game" then
-        gameState = "racegame"
-        returnState = "playing"
-        raceGame.load()
-        raceGame.setPlayerColor(localPlayer.color)
-        return
-    end
     
     
     if data:match("^laser_position,") then
