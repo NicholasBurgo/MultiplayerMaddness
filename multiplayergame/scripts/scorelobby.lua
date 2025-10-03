@@ -45,8 +45,8 @@ function scoreLobby.init()
     -- Create background stars
     for i = 1, 100 do
         table.insert(scoreLobby.backgroundStars, {
-            x = math.random(0, 800),
-            y = math.random(0, 600),
+            x = math.random(0, _G.BASE_WIDTH),
+            y = math.random(0, _G.BASE_HEIGHT),
             size = math.random(1, 3),
             speed = math.random(20, 60),
             alpha = math.random(0.3, 0.8)
@@ -161,8 +161,8 @@ function scoreLobby.show(roundNumber, wins, playersTable)
     -- Create celebration particles
     for i = 1, 50 do
         table.insert(scoreLobby.particleSystem, {
-            x = math.random(0, 800),
-            y = math.random(0, 600),
+            x = math.random(0, _G.BASE_WIDTH),
+            y = math.random(0, _G.BASE_HEIGHT),
             vx = math.random(-100, 100),
             vy = math.random(-100, 100),
             life = 2.0,
@@ -189,9 +189,9 @@ function scoreLobby.update(dt)
     -- Update background stars
     for _, star in ipairs(scoreLobby.backgroundStars) do
         star.y = star.y + star.speed * dt
-        if star.y > 600 then
+        if star.y > _G.BASE_HEIGHT then
             star.y = -10
-            star.x = math.random(0, 800)
+            star.x = math.random(0, _G.BASE_WIDTH)
         end
     end
     
@@ -303,7 +303,7 @@ function scoreLobby.draw()
     else
         -- Fallback background if lobbyBackground not available
         love.graphics.setColor(0.2, 0.3, 0.5, 1)
-        love.graphics.rectangle('fill', 0, 0, 800, 600)
+        love.graphics.rectangle('fill', 0, 0, _G.BASE_WIDTH, _G.BASE_HEIGHT)
     end
     
     -- Draw all players (same style as pre-game lobby)
@@ -370,7 +370,7 @@ function scoreLobby.draw()
     local timerPulse = math.sin(scoreLobby.animationTime * 5) * 0.3 + 0.7
     love.graphics.setColor(1, 1, 0, timerPulse)
     love.graphics.printf(string.format("Exit sequence: %.1f seconds remaining", scoreLobby.timer), 
-        0, 550, 800, "center")
+        0, 550, _G.BASE_WIDTH, "center")
 end
 
 -- Draw animated text (bold and centered)
@@ -403,9 +403,9 @@ function scoreLobby.drawAnimatedText()
     
     -- Draw the text with a thick shadow effect for better visibility (bold effect)
     love.graphics.setColor(0, 0, 0, 0.9)
-    love.graphics.printf(currentText, 4, textY + 4, 800, "center")
-    love.graphics.printf(currentText, 3, textY + 3, 800, "center")
-    love.graphics.printf(currentText, 2, textY + 2, 800, "center")
+    love.graphics.printf(currentText, 4, textY + 4, _G.BASE_WIDTH, "center")
+    love.graphics.printf(currentText, 3, textY + 3, _G.BASE_WIDTH, "center")
+    love.graphics.printf(currentText, 2, textY + 2, _G.BASE_WIDTH, "center")
     
     -- Reset color and draw main text
     if anim.currentPhase == 1 or anim.currentPhase == 3 then
@@ -413,7 +413,7 @@ function scoreLobby.drawAnimatedText()
     else
         love.graphics.setColor(1, 0.2, 0.2, 1)
     end
-    love.graphics.printf(currentText, 0, textY, 800, "center")
+    love.graphics.printf(currentText, 0, textY, _G.BASE_WIDTH, "center")
     
     -- Phase indicator removed for cleaner display
 end
@@ -431,7 +431,7 @@ function scoreLobby.drawVotingInstructions()
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.printf(string.format("Votes to quit: %d/%d (Need %d for 2/3 majority)", 
         currentVotes, voting.totalPlayers, voting.votesNeeded), 
-        0, 450, 800, "center")
+        0, 450, _G.BASE_WIDTH, "center")
     
     -- Draw instructions
     love.graphics.setFont(love.graphics.newFont(16))
@@ -440,23 +440,23 @@ function scoreLobby.drawVotingInstructions()
     if scoreLobby.timer <= 5 then
         love.graphics.setColor(1, 0.5, 0.5, 1)
         love.graphics.printf("Voting disabled - Final countdown!", 
-            0, 480, 800, "center")
+            0, 480, _G.BASE_WIDTH, "center")
     elseif not voting.hasVoted then
         love.graphics.setColor(0.8, 0.8, 1, 1)
         love.graphics.printf("Hold SPACE for 1.5 seconds to vote to quit", 
-            0, 480, 800, "center")
+            0, 480, _G.BASE_WIDTH, "center")
         
         -- Draw progress bar for space holding
         if voting.spaceHeld then
             local progress = math.min(voting.holdTimer / voting.holdDuration, 1.0)
             love.graphics.setColor(1, 1, 0, 1)
             love.graphics.printf(string.format("Voting... %.1f%%", progress * 100), 
-                0, 500, 800, "center")
+                0, 500, _G.BASE_WIDTH, "center")
         end
     else
         love.graphics.setColor(0, 1, 0, 1)
         love.graphics.printf("✓ You voted to quit!", 
-            0, 480, 800, "center")
+            0, 480, _G.BASE_WIDTH, "center")
     end
     
     -- Host instructions removed

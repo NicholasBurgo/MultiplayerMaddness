@@ -14,8 +14,8 @@ dodgeGame.sounds.laser:setVolume(0.2)
 dodgeGame.game_over = false
 dodgeGame.current_round_score = 0
 dodgeGame.playerColor = {1, 1, 1}
-dodgeGame.screen_width = 800
-dodgeGame.screen_height = 600
+dodgeGame.screen_width = _G.BASE_WIDTH
+dodgeGame.screen_height = _G.BASE_HEIGHT
 dodgeGame.camera_x = 0
 dodgeGame.camera_y = 0
 dodgeGame.death_count = 0

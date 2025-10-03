@@ -75,6 +75,70 @@ local isFirstPartyInstruction = true
 local partyModeTransitioned = false -- Prevent multiple transitions
 
 -- ============================================================================
+-- SCALING SYSTEM
+-- ============================================================================
+-- Base resolution that the game was designed for
+local BASE_WIDTH = 800
+local BASE_HEIGHT = 600
+
+-- Current scaling factors
+local scaleX = 1
+local scaleY = 1
+local scale = 1
+local offsetX = 0
+local offsetY = 0
+
+-- Scaling functions
+local function updateScaling()
+    local screenWidth = love.graphics.getWidth()
+    local screenHeight = love.graphics.getHeight()
+    
+    -- Calculate scale factors
+    scaleX = screenWidth / BASE_WIDTH
+    scaleY = screenHeight / BASE_HEIGHT
+    
+    -- Use the smaller scale to maintain aspect ratio
+    scale = math.min(scaleX, scaleY)
+    
+    -- Calculate offsets to center the game
+    offsetX = (screenWidth - BASE_WIDTH * scale) / 2
+    offsetY = (screenHeight - BASE_HEIGHT * scale) / 2
+end
+
+-- Function to scale coordinates from base resolution to current resolution
+local function scaleX(x)
+    return offsetX + x * scale
+end
+
+local function scaleY(y)
+    return offsetY + y * scale
+end
+
+-- Function to scale dimensions
+local function scaleW(width)
+    return width * scale
+end
+
+local function scaleH(height)
+    return height * scale
+end
+
+-- Function to scale font sizes
+local function scaleFont(size)
+    return math.max(1, size * scale)
+end
+
+-- Make scaling functions globally available
+_G.scaleX = scaleX
+_G.scaleY = scaleY
+_G.scaleW = scaleW
+_G.scaleH = scaleH
+_G.scaleFont = scaleFont
+_G.scale = scale
+_G.BASE_WIDTH = BASE_WIDTH
+_G.BASE_HEIGHT = BASE_HEIGHT
+
+-- ============================================================================
 -- GAME MODE VARIABLES
 -- ============================================================================
 -- Round tracking system
@@ -181,11 +245,10 @@ local function drawVotingPanel()
         -- Player vote recorded
     end
     
-    local screenWidth = love.graphics.getWidth()
-    local screenHeight = love.graphics.getHeight()
+    -- Use base dimensions instead of screen dimensions for proper scaling
     local panelWidth = 400  -- Increased width for bigger icons
     local panelHeight = 300  -- Increased height for bigger icons
-    local panelX = screenWidth - panelWidth - 20
+    local panelX = BASE_WIDTH - panelWidth - 20
     local panelY = 80
     
     -- Panel background (more visible)
@@ -777,28 +840,28 @@ end
 function drawGameModeSelection()
     -- Semi-transparent overlay
     love.graphics.setColor(0, 0, 0, 0.8)
-    love.graphics.rectangle('fill', 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    love.graphics.rectangle('fill', 0, 0, BASE_WIDTH, BASE_HEIGHT)
     
     -- Animated border with pulsing effect
     local pulse = math.sin(gameModeSelection.animationTime * 3) * 0.2 + 0.8
     love.graphics.setColor(0.2, 0.6, 1.0, pulse)
     love.graphics.setLineWidth(6)
-    love.graphics.rectangle('line', 50, 50, love.graphics.getWidth() - 100, love.graphics.getHeight() - 100)
+    love.graphics.rectangle('line', 50, 50, BASE_WIDTH - 100, BASE_HEIGHT - 100)
     love.graphics.setLineWidth(1)
     
     -- Title with pulsing effect
     local titlePulse = math.sin(gameModeSelection.animationTime * 2) * 0.3 + 0.7
     love.graphics.setColor(1, 1, 0, titlePulse)
     love.graphics.printf("SELECT GAME MODE", 
-        0, 100, love.graphics.getWidth(), "center")
+        0, 100, BASE_WIDTH, "center")
     
     -- Subtitle
     love.graphics.setColor(0.8, 0.8, 1, 1)
     love.graphics.printf("Use W/S to navigate, SPACE to select", 
-        0, 140, love.graphics.getWidth(), "center")
+        0, 140, BASE_WIDTH, "center")
     
     -- Game mode options
-    local centerY = love.graphics.getHeight() / 2 - 50 -- Move up to make room for description below
+    local centerY = BASE_HEIGHT / 2 - 50 -- Move up to make room for description below
     local optionSpacing = 70 -- Reduced spacing to bring options closer together
     
     for i, mode in ipairs(gameModeSelection.modes) do
@@ -820,10 +883,10 @@ function drawGameModeSelection()
         -- Option text (only show selection indicator, not both)
         if isSelected then
             love.graphics.setColor(1, 1, 0, pulse)
-            love.graphics.printf(">>> " .. mode .. " <<<", 0, y, love.graphics.getWidth(), "center")
+            love.graphics.printf(">>> " .. mode .. " <<<", 0, y, BASE_WIDTH, "center")
         else
             love.graphics.setColor(0.7, 0.7, 0.7, 1) -- Gray for unselected
-            love.graphics.printf(mode, 0, y, love.graphics.getWidth(), "center")
+            love.graphics.printf(mode, 0, y, BASE_WIDTH, "center")
         end
         
         -- Draw player pictures for who voted for this option
@@ -850,7 +913,7 @@ function drawGameModeSelection()
         -- Draw player pictures under the option
         if #votedPlayers > 0 then
             local picSize = 20
-            local startX = (love.graphics.getWidth() - (#votedPlayers * (picSize + 5))) / 2
+            local startX = (BASE_WIDTH - (#votedPlayers * (picSize + 5))) / 2
             local picY = y + 25
             
             for j, playerId in ipairs(votedPlayers) do
@@ -885,22 +948,22 @@ function drawGameModeSelection()
     love.graphics.setColor(0.6, 0.6, 1, 1)
     if gameModeSelection.selectedMode == 1 then
         love.graphics.printf("Choose specific levels to play", 
-            0, love.graphics.getHeight() - 120, love.graphics.getWidth(), "center")
+            0, BASE_HEIGHT - 120, BASE_WIDTH, "center")
     elseif gameModeSelection.selectedMode == 2 then
         love.graphics.printf("Random games in party mode", 
-            0, love.graphics.getHeight() - 120, love.graphics.getWidth(), "center")
+            0, BASE_HEIGHT - 120, BASE_WIDTH, "center")
     elseif gameModeSelection.selectedMode == 3 then
         love.graphics.printf("Start game with random selection from votes", 
-            0, love.graphics.getHeight() - 120, love.graphics.getWidth(), "center")
+            0, BASE_HEIGHT - 120, BASE_WIDTH, "center")
     elseif gameModeSelection.selectedMode == 4 then
         love.graphics.printf("Start game with host's selected level", 
-            0, love.graphics.getHeight() - 120, love.graphics.getWidth(), "center")
+            0, BASE_HEIGHT - 120, BASE_WIDTH, "center")
     end
     
     -- Instructions
     love.graphics.setColor(0.8, 0.8, 1, 1)
     love.graphics.printf("Press ESC to cancel", 
-        0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
+        0, BASE_HEIGHT - 80, BASE_WIDTH, "center")
     
     -- Draw voting panel in top right
     drawVotingPanel()
@@ -915,13 +978,13 @@ function drawLevelSelector()
     
     -- Semi-transparent overlay
     love.graphics.setColor(0, 0, 0, 0.8)
-    love.graphics.rectangle('fill', 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    love.graphics.rectangle('fill', 0, 0, BASE_WIDTH, BASE_HEIGHT)
     
     -- Animated border with pulsing effect
     local pulse = math.sin(levelSelector.animationTime * 3) * 0.2 + 0.8
     love.graphics.setColor(0.2, 0.8, 0.2, pulse)
     love.graphics.setLineWidth(6)
-    love.graphics.rectangle('line', 50, 50, love.graphics.getWidth() - 100, love.graphics.getHeight() - 100)
+    love.graphics.rectangle('line', 50, 50, BASE_WIDTH - 100, BASE_HEIGHT - 100)
     love.graphics.setLineWidth(1)
     
     -- Title with pulsing effect
@@ -938,22 +1001,22 @@ function drawLevelSelector()
     }
     
     love.graphics.printf(pageTitles[levelSelector.currentPage] or "SELECT LEVEL", 
-        0, 80, love.graphics.getWidth(), "center")
+        0, 80, BASE_WIDTH, "center")
     
     -- Subtitle with different instructions for host vs client
     love.graphics.setColor(0.8, 1, 0.8, 1)
     if gameState == "hosting" then
         love.graphics.printf("Use WASD to navigate, SPACE to vote, ENTER to launch", 
-            0, 120, love.graphics.getWidth(), "center")
+            0, 120, BASE_WIDTH, "center")
     else
         love.graphics.printf("Use WASD to navigate, SPACE to vote", 
-            0, 120, love.graphics.getWidth(), "center")
+            0, 120, BASE_WIDTH, "center")
     end
     
     -- Calculate grid positioning
     local totalGridWidth = levelSelector.gridCols * levelSelector.cardWidth + (levelSelector.gridCols - 1) * levelSelector.cardSpacing
     local totalGridHeight = levelSelector.gridRows * levelSelector.cardHeight + (levelSelector.gridRows - 1) * levelSelector.cardSpacing
-    local startX = (love.graphics.getWidth() - totalGridWidth) / 2
+    local startX = (BASE_WIDTH - totalGridWidth) / 2
     local startY = 150
     
     -- Draw level cards in grid
@@ -1092,7 +1155,7 @@ function drawLevelSelector()
         local partyVotesY = startY + levelSelector.gridRows * (levelSelector.cardHeight + levelSelector.cardSpacing) + 20
         love.graphics.setColor(0.8, 0.4, 1, 1) -- Purple for party mode
         love.graphics.printf("Party Mode Votes (" .. #levelSelector.partyModeVotes .. "):", 
-            0, partyVotesY, love.graphics.getWidth(), "center")
+            0, partyVotesY, BASE_WIDTH, "center")
         
         -- Show player names who voted for party mode
         local playerNames = {}
@@ -1105,24 +1168,24 @@ function drawLevelSelector()
         if #playerNames > 0 then
             love.graphics.setColor(0.6, 0.3, 0.8, 1)
             love.graphics.printf(table.concat(playerNames, ", "), 
-                0, partyVotesY + 20, love.graphics.getWidth(), "center")
+                0, partyVotesY + 20, BASE_WIDTH, "center")
         end
     end
     
     -- Draw themed page navigation (moved down to avoid overlap)
     local totalPages = #levelSelector.pages
-    local pageY = love.graphics.getHeight() - 100  -- Moved down by 20 pixels
+    local pageY = BASE_HEIGHT - 100  -- Moved down by 20 pixels
     
     -- Enhanced page indicator with themed styling
     love.graphics.setColor(1, 1, 1, 0.9)
     love.graphics.setFont(love.graphics.newFont(24))
     love.graphics.printf("PAGE " .. levelSelector.currentPage .. " OF " .. totalPages, 
-        0, pageY, love.graphics.getWidth(), "center")
+        0, pageY, BASE_WIDTH, "center")
     
     -- Page dots indicator
     local dotSpacing = 20
     local totalDotWidth = (totalPages - 1) * dotSpacing
-    local dotStartX = (love.graphics.getWidth() - totalDotWidth) / 2
+    local dotStartX = (BASE_WIDTH - totalDotWidth) / 2
     
     for i = 1, totalPages do
         local dotX = dotStartX + (i - 1) * dotSpacing
@@ -1145,7 +1208,7 @@ function drawLevelSelector()
     love.graphics.setColor(0.8, 0.8, 1, 0.9)
     love.graphics.setFont(love.graphics.newFont(16))
     love.graphics.printf("Q/E: Previous/Next Page | WASD: Navigate | SPACE: Vote", 
-        0, pageY + 55, love.graphics.getWidth(), "center")
+        0, pageY + 55, BASE_WIDTH, "center")
     
     -- Navigation instructions removed for cleaner look
 end
@@ -1250,6 +1313,9 @@ function love.load() -- music effect
     players = {}
     debugConsole.init()
     love.keyboard.setKeyRepeat(true)
+    
+    -- Initialize scaling system
+    updateScaling()
     
     -- Load saved player data
     loadPlayerData()
@@ -2310,6 +2376,11 @@ function updateClient()
     end
 end
 
+function love.resize(w, h)
+    -- Update scaling when window is resized
+    updateScaling()
+end
+
 function love.draw()
     if gameState == "jumpgame" then
         jumpGame.draw(players, localPlayer.id)
@@ -2323,10 +2394,14 @@ function love.draw()
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
     elseif gameState == "menu" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
         local frameWidth = 71 * scale
-        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", BASE_WIDTH/2, 100) -- for music effect
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
         titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
@@ -2335,12 +2410,18 @@ function love.draw()
         drawButton(buttons.customize, "customize_button")
         drawButton(buttons.settings, "settings_button")
         drawButton(buttons.quit, "quit_button")
+        
+        love.graphics.pop()
 
     elseif gameState == "play_menu" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
         local frameWidth = 71 * scale
-        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", BASE_WIDTH/2, 100) -- for music effect
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
         titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
@@ -2348,43 +2429,64 @@ function love.draw()
         drawButton(buttons.host, "host_button")
         drawButton(buttons.join, "join_button")
         drawButton(buttons.back_play, "back_play_button")
+        
+        love.graphics.pop()
 
     elseif gameState == "settings_menu" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
         local frameWidth = 71 * scale
-        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", BASE_WIDTH/2, 100) -- for music effect
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
         titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
 
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("Settings", 0, 200, love.graphics.getWidth(), "center")
-        love.graphics.printf("Settings options coming soon!", 0, 250, love.graphics.getWidth(), "center")
+        love.graphics.printf("Settings", 0, 200, BASE_WIDTH, "center")
+        love.graphics.printf("Settings options coming soon!", 0, 250, BASE_WIDTH, "center")
         
         drawButton(buttons.back_settings, "back_settings_button")
+        love.graphics.pop()
     elseif gameState == "customize_menu" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         local bgx, bgy = musicHandler.applyToDrawable("menu_bg", 0, 0) --changes for music effect
         local scale = 3
         local frameWidth = 71 * scale
-        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", love.graphics.getWidth()/2, 100) -- for music effect
+        local ex, ey, er, esx, esy = musicHandler.applyToDrawable("title", BASE_WIDTH/2, 100) -- for music effect
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(menuBackground, bgx, bgy) --changes for music effect
         titleGifAnim:draw(titleGifSprite, ex, ey, er or 0, scale * (esx or 1), scale * (esx or 1), 71/2, 32/2)
 
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("Customize", 0, 200, love.graphics.getWidth(), "center")
-        love.graphics.printf("Character customization coming soon!", 0, 250, love.graphics.getWidth(), "center")
+        love.graphics.printf("Customize", 0, 200, BASE_WIDTH, "center")
+        love.graphics.printf("Character customization coming soon!", 0, 250, BASE_WIDTH, "center")
         
         drawButton(buttons.back_customize, "back_customize_button")
+        love.graphics.pop()
     elseif gameState == "customization" then
         characterCustomization.draw()
     elseif gameState == "connecting" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         love.graphics.printf("Connecting to " .. inputField.text .. ":" .. inputPort, 
-            0, 100, love.graphics.getWidth(), "center")
+            0, 100, BASE_WIDTH, "center")
         drawInputField()
         drawButton(buttons.start)
+        love.graphics.pop()
     elseif gameState == "playing" or gameState == "hosting" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        
         -- Draw background
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(lobbyBackground, 0, 0)
@@ -2448,10 +2550,13 @@ function love.draw()
             -- Show voting instructions when not in game mode selection
             love.graphics.setColor(0.8, 0.8, 1, 0.8)
             love.graphics.printf("Press SPACE to select game mode", 
-                0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
+                0, BASE_HEIGHT - 80, BASE_WIDTH, "center")
         end
         
         -- Debug button removed - now only in F3 console
+        
+        -- End scaling transformation for lobby
+        love.graphics.pop()
     end
 
     -- Draw instructions overlay last (if showing)
@@ -2531,22 +2636,26 @@ function drawInputField()
 end
 
 function love.mousepressed(x, y, button)
+    -- Transform mouse coordinates to base resolution
+    local baseX = (x - offsetX) / scale
+    local baseY = (y - offsetY) / scale
+    
     if button == 1 then  -- Left mouse button
         if gameState == "menu" then
-            if isMouseOver(buttons.play) then
+            if isMouseOver(buttons.play, baseX, baseY) then
                 gameState = "play_menu"
-            elseif isMouseOver(buttons.customize) then
+            elseif isMouseOver(buttons.customize, baseX, baseY) then
                 gameState = "customization"
                 afterCustomization = "customize_only"
                 characterCustomization.initialize(localPlayer)
                 characterCustomization.init()
-            elseif isMouseOver(buttons.settings) then
+            elseif isMouseOver(buttons.settings, baseX, baseY) then
                 gameState = "settings_menu"
-            elseif isMouseOver(buttons.quit) then
+            elseif isMouseOver(buttons.quit, baseX, baseY) then
                 love.event.quit()
             end
         elseif gameState == "play_menu" then
-            if isMouseOver(buttons.host) then
+            if isMouseOver(buttons.host, baseX, baseY) then
                 debugConsole.addMessage("[Play Menu] Starting host game")
                 startServer()
                 debugConsole.addMessage(string.format("[Play Menu] After startServer(), gameState = %s", gameState))
@@ -2573,26 +2682,26 @@ function love.mousepressed(x, y, button)
                     end
                     debugConsole.addMessage("[Play Menu] Fallback hosting mode activated")
                 end
-            elseif isMouseOver(buttons.join) then
+            elseif isMouseOver(buttons.join, baseX, baseY) then
                 debugConsole.addMessage("[Play Menu] Switching to connecting state")
                 gameState = "connecting"
                 buttons.start.visible = true
-            elseif isMouseOver(buttons.back_play) then
+            elseif isMouseOver(buttons.back_play, baseX, baseY) then
                 scoreLobby.forceHide() -- Hide score lobby when returning to menu
                 gameState = "menu"
             end
         elseif gameState == "settings_menu" then
-            if isMouseOver(buttons.back_settings) then
+            if isMouseOver(buttons.back_settings, baseX, baseY) then
                 scoreLobby.forceHide() -- Hide score lobby when returning to menu
                 gameState = "menu"
             end
         elseif gameState == "customize_menu" then
-            if isMouseOver(buttons.back_customize) then
+            if isMouseOver(buttons.back_customize, baseX, baseY) then
                 scoreLobby.forceHide() -- Hide score lobby when returning to menu
                 gameState = "menu"
             end
         elseif gameState == "customization" then
-            local result = characterCustomization.mousepressed(x, y, button)
+            local result = characterCustomization.mousepressed(baseX, baseY, button)
             debugConsole.addMessage(string.format("Customization result: %s", tostring(result)))
             if result == "confirm" then
                 -- Apply the selected color, face, and name to localPlayer
@@ -2682,6 +2791,13 @@ end
 
 function love.keypressed(key)
     debugConsole.addMessage("[Main] Key pressed: " .. key .. " in gameState: " .. gameState)
+    
+    -- Handle fullscreen toggle (F11)
+    if key == "f11" then
+        love.window.setFullscreen(not love.window.getFullscreen())
+        updateScaling()
+        return
+    end
     
     -- Handle debug console input
     if debugConsole.keypressed and debugConsole.keypressed(key) then
@@ -3929,8 +4045,13 @@ function drawInputField()
     end
 end
 
-function isMouseOver(item)
-    local mx, my = love.mouse.getPosition()
+function isMouseOver(item, mx, my)
+    -- Use provided coordinates or get current mouse position and transform it
+    if not mx or not my then
+        mx, my = love.mouse.getPosition()
+        mx = (mx - offsetX) / scale
+        my = (my - offsetY) / scale
+    end
     return mx > item.x and mx < item.x + item.width and my > item.y and my < item.y + item.height
 end
 

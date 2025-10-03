@@ -95,7 +95,7 @@ end
 
 function jumpGame.load()
     love.window.setTitle("Jump Game")
-    love.window.setMode(800, 600)
+    -- Window size is now handled by the main scaling system
 
     jumpGame.background_image = love.graphics.newImage("images/JKGame.png")
 
