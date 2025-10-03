@@ -14,8 +14,8 @@ battleRoyale.sounds.death:setVolume(0.3)
 battleRoyale.game_over = false
 battleRoyale.current_round_score = 0
 battleRoyale.playerColor = {1, 1, 1}
-battleRoyale.screen_width = 800
-battleRoyale.screen_height = 600
+battleRoyale.screen_width = 800  -- Fixed base resolution
+battleRoyale.screen_height = 600  -- Fixed base resolution
 battleRoyale.camera_x = 0
 battleRoyale.camera_y = 0
 battleRoyale.death_count = 0
@@ -42,7 +42,7 @@ battleRoyale.max_shrink_padding_y = 200
 -- Use safe timer calculation with fallback for party mode
 local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
 battleRoyale.timer = beatInterval * 12.5 -- 25 seconds (reduced by 15 seconds)
-battleRoyale.safe_zone_radius = 250 -- Start at max radius
+battleRoyale.safe_zone_radius = 450 -- Start at max radius (increased to compensate for smaller scale)
 battleRoyale.center_x = 400
 battleRoyale.center_y = 300
 battleRoyale.death_timer = 0
@@ -50,9 +50,9 @@ battleRoyale.death_shake = 0
 battleRoyale.player_dropped = false
 battleRoyale.death_animation_done = false
 
--- Random grow/shrink system
-battleRoyale.min_radius = 120
-battleRoyale.max_radius = 250
+-- Random grow/shrink system (compensated for smaller scale)
+battleRoyale.min_radius = 200  -- Increased to compensate for smaller scale
+battleRoyale.max_radius = 450  -- Increased to compensate for smaller scale
 battleRoyale.shrink_chance = 1.0 -- Always shrink, never grow
 battleRoyale.size_change_timer = 0
 battleRoyale.size_change_interval = 1.5 -- Change every 1.5 seconds
@@ -68,12 +68,12 @@ battleRoyale.sync_interval = 1/60 -- Send sync every 1/60 seconds (60 times per 
 battleRoyale.respawn_timer = 0 -- Timer for respawn mechanism
 battleRoyale.respawn_delay = 1 -- 1 second before respawn
 
--- Player settings
+-- Player settings (30x30 to match laser game)
 battleRoyale.player = {
     x = 400,
     y = 300,
-    width = 40,
-    height = 40,
+    width = 30,
+    height = 30,
     speed = 250,
     normal_speed = 250,
     points = 0,
@@ -201,8 +201,8 @@ function battleRoyale.load()
     battleRoyale.player = {
         x = 400,
         y = 300,
-        width = 40,
-        height = 40,
+        width = 30,
+        height = 30,
         speed = 250,
         normal_speed = 250,
         points = 0,
@@ -834,7 +834,7 @@ function battleRoyale.drawUI(playersTable, localPlayerId)
     love.graphics.print('Score: ' .. math.floor(battleRoyale.current_round_score), 10, 10)
 
     love.graphics.printf(string.format("Time: %.1f", battleRoyale.timer), 
-    0, 10, love.graphics.getWidth(), "center")
+    0, 10, 800, "center")
     
     if playersTable and playersTable[localPlayerId] then
         love.graphics.print('Total Score: ' .. 

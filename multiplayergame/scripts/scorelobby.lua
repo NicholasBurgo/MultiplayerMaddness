@@ -306,12 +306,12 @@ function scoreLobby.draw()
         love.graphics.rectangle('fill', 0, 0, _G.BASE_WIDTH, _G.BASE_HEIGHT)
     end
     
-    -- Draw all players (same style as pre-game lobby)
+    -- Draw all players (same style as pre-game lobby, 30x30 to match laser game)
     for id, player in pairs(scoreLobby.players) do
         if player and player.color then
-            -- Draw player square (same as pre-game lobby)
+            -- Draw player square (30x30 to match laser game)
             love.graphics.setColor(player.color[1], player.color[2], player.color[3])
-            love.graphics.rectangle("fill", player.x or 100, player.y or 100, 50, 50)
+            love.graphics.rectangle("fill", player.x or 100, player.y or 100, 30, 30)
             
             -- Draw face image if it exists (same as pre-game lobby)
             if player.facePoints and type(player.facePoints) == "userdata" then
@@ -321,8 +321,8 @@ function scoreLobby.draw()
                     player.x or 100,
                     player.y or 100,
                     0,
-                    50/100,
-                    50/100
+                    30/100,
+                    30/100
                 )
             end
             
@@ -331,8 +331,8 @@ function scoreLobby.draw()
             love.graphics.printf(
                 player.name or "Player",
                 (player.x or 100) - 30,
-                (player.y or 100) - 45,
-                120,
+                (player.y or 100) - 35,
+                100,
                 "center"
             )
             
@@ -341,8 +341,8 @@ function scoreLobby.draw()
             love.graphics.printf(
                 "Score: " .. math.floor(player.totalScore or 0),
                 (player.x or 100) - 30,
-                (player.y or 100) - 25,
-                120,
+                (player.y or 100) - 20,
+                100,
                 "center"
             )
             
@@ -352,7 +352,7 @@ function scoreLobby.draw()
                 love.graphics.printf(
                     "VOTED TO QUIT",
                     (player.x or 100) - 40,
-                    (player.y or 100) + 60,
+                    (player.y or 100) + 40,
                     120,
                     "center"
                 )

@@ -103,6 +103,9 @@ local function updateScaling()
     -- Calculate offsets to center the game
     offsetX = (screenWidth - BASE_WIDTH * scale) / 2
     offsetY = (screenHeight - BASE_HEIGHT * scale) / 2
+    
+    -- Update global scale (for any modules that might use it)
+    _G.scale = scale
 end
 
 -- Function to scale coordinates from base resolution to current resolution
@@ -313,7 +316,7 @@ local function drawTabMenu()
     local menuWidth = 400
     local menuHeight = math.min(#sortedPlayers * 50 + 60, tabMenu.maxPlayers * 50 + 60)
     local menuX = (screenWidth - menuWidth) / 2
-    local menuY = (screenHeight - menuHeight) / 2
+    local menuY = 100  -- Position near the top of the screen
     
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", menuX, menuY, menuWidth, menuHeight)
@@ -2385,14 +2388,25 @@ function love.draw()
     if gameState == "jumpgame" then
         jumpGame.draw(players, localPlayer.id)
     elseif gameState == "lasergame" then
-        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
         laserGame.draw(players, localPlayer.id)
+        love.graphics.pop()
     elseif gameState == "battleroyale" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
         debugConsole.addMessage("[Draw] Drawing battle royale game")
         battleRoyale.draw(players, localPlayer.id)
+        love.graphics.pop()
     elseif gameState == "dodgegame" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
+        love.graphics.pop()
     elseif gameState == "menu" then
         love.graphics.push()
         love.graphics.translate(offsetX, offsetY)
@@ -2496,9 +2510,9 @@ function love.draw()
         -- Draw all players
         for id, player in pairs(players) do
             if player and player.color then
-                -- Draw player square
+                -- Draw player square (30x30 to match laser game)
                 love.graphics.setColor(player.color[1], player.color[2], player.color[3])
-                love.graphics.rectangle("fill", player.x, player.y, 50, 50)
+                love.graphics.rectangle("fill", player.x, player.y, 30, 30)
                 
                 -- Draw face image if it exists
                 if player.facePoints and type(player.facePoints) == "userdata" then
@@ -2508,8 +2522,8 @@ function love.draw()
                         player.x,
                         player.y,
                         0,
-                        50/100,
-                        50/100
+                        30/100,
+                        30/100
                     )
                 end
                 
@@ -2518,8 +2532,8 @@ function love.draw()
                 love.graphics.printf(
                     player.name or "Player",
                     player.x - 30,
-                    player.y - 45,
-                    120,
+                    player.y - 35,
+                    100,
                     "center"
                 )
                 
@@ -2528,8 +2542,8 @@ function love.draw()
                 love.graphics.printf(
                     "Score: " .. math.floor(player.totalScore or 0),
                     player.x - 30,
-                    player.y - 25,
-                    120,
+                    player.y - 20,
+                    100,
                     "center"
                 )
                 
@@ -2577,8 +2591,14 @@ function love.draw()
         love.graphics.print("Players: " .. #table_keys(players), 10, 50)
     end
 
-    -- Draw score lobby if showing
-    scoreLobby.draw()
+    -- Draw score lobby if showing (with scaling)
+    if scoreLobby.showing then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        scoreLobby.draw()
+        love.graphics.pop()
+    end
     
     -- Draw score display if showing
     drawScoreDisplay()
@@ -5574,13 +5594,19 @@ end
 
 function love.mousemoved(x, y)
     if gameState == "customization" then
-        characterCustomization.mousemoved(x, y)
+        -- Transform mouse coordinates to base resolution
+        local baseX = (x - offsetX) / scale
+        local baseY = (y - offsetY) / scale
+        characterCustomization.mousemoved(baseX, baseY)
     end
 end
 
 function love.mousereleased(x, y, button)
     if gameState == "customization" then
-        characterCustomization.mousereleased(x, y, button)
+        -- Transform mouse coordinates to base resolution
+        local baseX = (x - offsetX) / scale
+        local baseY = (y - offsetY) / scale
+        characterCustomization.mousereleased(baseX, baseY, button)
     end
 end
 

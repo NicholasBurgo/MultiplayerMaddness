@@ -14,8 +14,8 @@ dodgeGame.sounds.laser:setVolume(0.2)
 dodgeGame.game_over = false
 dodgeGame.current_round_score = 0
 dodgeGame.playerColor = {1, 1, 1}
-dodgeGame.screen_width = _G.BASE_WIDTH
-dodgeGame.screen_height = _G.BASE_HEIGHT
+dodgeGame.screen_width = 800  -- Fixed base resolution
+dodgeGame.screen_height = 600  -- Fixed base resolution
 dodgeGame.camera_x = 0
 dodgeGame.camera_y = 0
 dodgeGame.death_count = 0
@@ -38,12 +38,12 @@ dodgeGame.indicator_drag_speed = 0.3 -- How fast indicator follows player (0.1 =
 dodgeGame.laser_spawn_interval = 3.0 -- Spawn laser every 3 seconds
 dodgeGame.next_laser_time = 0
 
--- Player settings
+-- Player settings (30x30 to match laser game)
 dodgeGame.player = {
     x = 400,
     y = 300,
-    width = 40,
-    height = 40,
+    width = 30,
+    height = 30,
     speed = 300,
     points = 0,
     is_invincible = false,
@@ -85,8 +85,8 @@ function dodgeGame.load()
     dodgeGame.player = {
         x = 400,
         y = 300,
-        width = 40,
-        height = 40,
+        width = 30,
+        height = 30,
         speed = 300,
         points = 0,
         is_invincible = false,
@@ -401,7 +401,7 @@ function dodgeGame.drawUI(playersTable, localPlayerId)
     love.graphics.print('Score: ' .. math.floor(dodgeGame.current_round_score), 10, 10)
 
     love.graphics.printf(string.format("Time: %.1f", dodgeGame.timer), 
-        0, 10, love.graphics.getWidth(), "center")
+        0, 10, 800, "center")
     
     if playersTable and playersTable[localPlayerId] then
         love.graphics.print('Total Score: ' .. 
