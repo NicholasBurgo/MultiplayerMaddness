@@ -29,7 +29,7 @@ local achievements = {
     battle_survivor = {
         id = "ACH_BATTLE_SURVIVOR",
         name = "Battle Survivor",
-        description = "Win a Battle Royale game",
+        description = "Win a Meteor Shower game",
         icon = "battle_survivor",
         unlocked = false
     },
@@ -69,7 +69,7 @@ local stats = {
     total_games_played = 0,
     jump_game_high_score = 0,
     laser_game_best_time = 0,
-    battle_royale_wins = 0,
+    meteor_shower_wins = 0,
     dodge_game_best_score = 0,
     multiplayer_games_hosted = 0,
     unique_players_met = 0
@@ -270,9 +270,9 @@ function steam_achievements.onGameWin(gameType, score)
         if score > steam_achievements.getStat("jump_game_high_score") then
             steam_achievements.setStat("jump_game_high_score", score)
         end
-    elseif gameType == "battle_royale" then
+    elseif gameType == "meteor_shower" then
         steam_achievements.unlock("battle_survivor")
-        steam_achievements.incrementStat("battle_royale_wins")
+        steam_achievements.incrementStat("meteor_shower_wins")
     end
 end
 

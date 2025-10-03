@@ -45,33 +45,7 @@ function debugConsole.initCommands()
         end
     end
     
-    debugConsole.commands["testscorelobby"] = function()
-        if _G.scoreLobby and _G.players then
-            -- Create test round wins
-            local roundWins = {}
-            for id, player in pairs(_G.players) do
-                roundWins[id] = math.random(0, 3) -- Random wins for testing
-            end
-            
-            -- Show score lobby for all players (like level selection)
-            _G.scoreLobby.show(4, roundWins, _G.players)
-            debugConsole.addMessage("[Debug] Testing score lobby for all players")
-            
-            -- If we're the host, notify all clients about the score lobby
-            if _G.gameState == "hosting" and _G.serverClients then
-                for _, client in ipairs(_G.serverClients) do
-                    local message = "show_score_lobby,4"
-                    for id, wins in pairs(roundWins) do
-                        message = message .. "," .. id .. "," .. wins
-                    end
-                    _G.safeSend(client, message)
-                end
-                debugConsole.addMessage("[Debug] Notified all clients about score lobby")
-            end
-        else
-            debugConsole.addMessage("[Debug] Score lobby not available")
-        end
-    end
+    -- Score lobby removed
     
     debugConsole.commands["help"] = function()
         debugConsole.addMessage("[Debug] Available commands:")

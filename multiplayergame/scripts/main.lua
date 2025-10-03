@@ -5,8 +5,8 @@
 -- with networking support for local multiplayer sessions.
 -- 
 -- Features:
--- - Multiple game modes (Jump Game, Laser Game, Battle Royale, Dodge Game, Race Game)
--- - Party mode with sequential game rotation (Jump → Laser → Battle Royale → Dodge → repeat)
+-- - Multiple game modes (Jump Game, Laser Game, Meteor Shower, Dodge Game)
+-- - Party mode with sequential game rotation (Jump → Laser → Meteor Shower → Dodge → repeat)
 -- - Character customization with face drawing
 -- - Score tracking and round-based gameplay
 -- - Network multiplayer support
@@ -19,10 +19,11 @@ local enet = require "enet"
 local anim8 = require "scripts.anim8"
 local jumpGame = require "scripts.jumpgame"
 local laserGame = require "scripts.lasergame"
-local battleRoyale = require "scripts.battleroyale"
+local meteorShower = require "scripts.meteorshower"
 local dodgeGame = require "scripts.dodgegame"
+local praiseGame = require "scripts.praisegame"
 local characterCustomization = require "scripts.charactercustom"
-local scoreLobby = require "scripts.scorelobby"
+-- Score lobby removed
 local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 local instructions = require "scripts.instructions"
@@ -73,6 +74,16 @@ _G.partyMode = partyMode -- Make it globally accessible
 local currentPartyGame = nil
 local isFirstPartyInstruction = true
 local partyModeTransitioned = false -- Prevent multiple transitions
+
+-- ============================================================================
+-- FONT SYSTEM (prevents cumulative scaling issues)
+-- ============================================================================
+local fonts = {
+    small = nil,    -- 14px
+    medium = nil,   -- 16px
+    large = nil,    -- 18px
+    xlarge = nil    -- 24px
+}
 
 -- ============================================================================
 -- SCALING SYSTEM
@@ -129,6 +140,14 @@ end
 -- Function to scale font sizes
 local function scaleFont(size)
     return math.max(1, size * scale)
+end
+
+-- Function to initialize fonts (prevents cumulative scaling issues)
+local function initFonts()
+    fonts.small = love.graphics.newFont(14)
+    fonts.medium = love.graphics.newFont(16)
+    fonts.large = love.graphics.newFont(18)
+    fonts.xlarge = love.graphics.newFont(24)
 end
 
 -- Make scaling functions globally available
@@ -264,7 +283,7 @@ local function drawVotingPanel()
     
     -- Panel title
     love.graphics.setColor(0, 1, 0, 1)
-    love.graphics.setFont(love.graphics.newFont(16))
+    love.graphics.setFont(fonts.medium)
     love.graphics.printf("VOTING STATUS", panelX, panelY + 10, panelWidth, "center")
     
     -- Draw players and their votes (text only, no icons)
@@ -275,18 +294,18 @@ local function drawVotingPanel()
         if player.name then
             -- Player name with color indicator
             love.graphics.setColor(player.color[1], player.color[2], player.color[3], 1)
-            love.graphics.setFont(love.graphics.newFont(16))
+            love.graphics.setFont(fonts.medium)
             love.graphics.printf("● " .. player.name, panelX + 10, panelY + yOffset, panelWidth - 20, "left")
             
             -- Show what they voted for
             local votedLevel = levelSelector.playerVotes[id]
             if votedLevel and levelSelector.pages[levelSelector.currentPage] and levelSelector.pages[levelSelector.currentPage][votedLevel] then
                 love.graphics.setColor(0.7, 0.7, 0.7, 1)
-                love.graphics.setFont(love.graphics.newFont(14))
+                love.graphics.setFont(fonts.small)
                 love.graphics.printf("  → " .. levelSelector.pages[levelSelector.currentPage][votedLevel].name, panelX + 10, panelY + yOffset + 15, panelWidth - 20, "left")
             else
                 love.graphics.setColor(0.5, 0.5, 0.5, 1)
-                love.graphics.setFont(love.graphics.newFont(14))
+                love.graphics.setFont(fonts.small)
                 love.graphics.printf("  → No vote", panelX + 10, panelY + yOffset + 15, panelWidth - 20, "left")
             end
             
@@ -325,7 +344,7 @@ local function drawTabMenu()
     
     -- Title
     love.graphics.setColor(1, 1, 1, 0.9)
-    love.graphics.setFont(love.graphics.newFont(24))
+    love.graphics.setFont(fonts.xlarge)
     love.graphics.printf("Player List", menuX, menuY + 10, menuWidth, "center")
     
     -- Draw players (up to maxPlayers)
@@ -343,17 +362,17 @@ local function drawTabMenu()
         
         -- Position number
         love.graphics.setColor(medalColor[1], medalColor[2], medalColor[3], 0.9)
-        love.graphics.setFont(love.graphics.newFont(16))
+        love.graphics.setFont(fonts.medium)
         love.graphics.printf("#" .. i, menuX + 15, y + 12, 50, "left")
         
         -- Player name
         love.graphics.setColor(medalColor[1], medalColor[2], medalColor[3], 0.9)
-        love.graphics.setFont(love.graphics.newFont(18))
+        love.graphics.setFont(fonts.large)
         love.graphics.printf(player.name, menuX + 70, y + 10, 200, "left")
         
         -- Score
         love.graphics.setColor(1, 1, 1, 0.9)
-        love.graphics.setFont(love.graphics.newFont(16))
+        love.graphics.setFont(fonts.medium)
         love.graphics.printf("Score: " .. player.totalScore, menuX + 280, y + 12, 100, "right")
     end
 end
@@ -362,19 +381,21 @@ end
 local miniGameLineup = {
     "jumpgame",
     "lasergame", 
-    "battleroyale",
-    "dodgegame"
+    "meteorshower",
+    "dodgegame",
+    "praisegame"
 }
 local currentGameIndex = 1
 
 -- Function to reset the game lineup to the correct sequence
 local function resetGameLineup()
-    -- Ensure the lineup follows the correct sequence: Jump Game → Laser Game → Battle Royale → Dodge Game
+    -- Ensure the lineup follows the correct sequence: Jump Game → Laser Game → Meteor Shower → Dodge Game → Praise Game
     miniGameLineup = {
         "jumpgame",
         "lasergame", 
-        "battleroyale",
-        "dodgegame"
+        "meteorshower",
+        "dodgegame",
+        "praisegame"
     }
     currentGameIndex = 1
 end
@@ -397,10 +418,10 @@ local levelSelector = {
         {
             {name = "Jump Game", description = "Platform jumping challenge", image = "images/jumpintro.png"},
             {name = "Laser Game", description = "Dodge laser beams", image = "images/lasersintro.png"},
-            {name = "Battle Royale", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
+            {name = "Meteor Shower", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
             {name = "Dodge Laser", description = "Quick reflex dodging", image = "images/menu-background.jpg"},
-            {name = "Coming Soon", description = "New game mode in development", image = "images/menu-background.jpg"},
-            {name = "Coming Soon", description = "Exciting content coming soon", image = "images/menu-background.jpg"}
+            {name = "Praise Game", description = "Simple movement challenge", image = "images/menu-background.jpg"},
+            {name = "Coming Soon", description = "New game mode in development", image = "images/menu-background.jpg"}
         },
         -- Page 2: Racing Games
         {
@@ -1181,7 +1202,7 @@ function drawLevelSelector()
     
     -- Enhanced page indicator with themed styling
     love.graphics.setColor(1, 1, 1, 0.9)
-    love.graphics.setFont(love.graphics.newFont(24))
+    love.graphics.setFont(fonts.xlarge)
     love.graphics.printf("PAGE " .. levelSelector.currentPage .. " OF " .. totalPages, 
         0, pageY, BASE_WIDTH, "center")
     
@@ -1209,7 +1230,7 @@ function drawLevelSelector()
     
     -- Navigation instructions with better styling
     love.graphics.setColor(0.8, 0.8, 1, 0.9)
-    love.graphics.setFont(love.graphics.newFont(16))
+    love.graphics.setFont(fonts.medium)
     love.graphics.printf("Q/E: Previous/Next Page | WASD: Navigate | SPACE: Vote", 
         0, pageY + 55, BASE_WIDTH, "center")
     
@@ -1238,18 +1259,18 @@ _G.serverClients = serverClients
 function syncGameState()
     debugConsole.addMessage("[Sync] syncGameState called - gameState: " .. gameState .. ", returnState: " .. tostring(returnState) .. ", clients: " .. #serverClients)
     
-    if gameState == "battleroyale" and returnState == "hosting" then
+    if gameState == "meteorshower" and returnState == "hosting" then
         -- Host sends complete game state to all clients
-        local meteoroidData = serializeMeteoroids(battleRoyale.asteroids)
+        local meteoroidData = serializeMeteoroids(meteorShower.asteroids)
         local safeZoneData = string.format("%.2f,%.2f,%.2f", 
-            battleRoyale.center_x, battleRoyale.center_y, battleRoyale.safe_zone_radius)
+            meteorShower.center_x, meteorShower.center_y, meteorShower.safe_zone_radius)
         
         -- Simplified message for testing
         local message = string.format("game_state_sync,test_meteoroids,%.2f,%.2f,%.2f,%.2f", 
-            battleRoyale.center_x, battleRoyale.center_y, battleRoyale.safe_zone_radius, battleRoyale.timer)
+            meteorShower.center_x, meteorShower.center_y, meteorShower.safe_zone_radius, meteorShower.timer)
         
         debugConsole.addMessage("[Sync] Message length: " .. #message)
-        debugConsole.addMessage("[Sync] Asteroids: " .. #battleRoyale.asteroids)
+        debugConsole.addMessage("[Sync] Asteroids: " .. #meteorShower.asteroids)
         
         for _, client in ipairs(serverClients) do
             safeSend(client, message)
@@ -1257,13 +1278,13 @@ function syncGameState()
         end
         
         -- Update local sync state
-        gameStateSync.meteoroids = battleRoyale.asteroids
+        gameStateSync.meteoroids = meteorShower.asteroids
         gameStateSync.safeZone = {
-            center_x = battleRoyale.center_x,
-            center_y = battleRoyale.center_y,
-            radius = battleRoyale.safe_zone_radius
+            center_x = meteorShower.center_x,
+            center_y = meteorShower.center_y,
+            radius = meteorShower.safe_zone_radius
         }
-        gameStateSync.gameTime = battleRoyale.timer
+        gameStateSync.gameTime = meteorShower.timer
         gameStateSync.lastSyncTime = love.timer.getTime()
         
         debugConsole.addMessage("[Sync] Sent game state to " .. #serverClients .. " clients")
@@ -1299,7 +1320,7 @@ function deserializeMeteoroids(data)
                     points = {}
                 }
                 -- Generate shape for the meteoroid
-                battleRoyale.generateAsteroidShape(meteoroid)
+                meteorShower.generateAsteroidShape(meteoroid)
                 table.insert(meteoroids, meteoroid)
             end
         end
@@ -1320,11 +1341,14 @@ function love.load() -- music effect
     -- Initialize scaling system
     updateScaling()
     
+    -- Initialize fonts (prevents cumulative scaling issues)
+    initFonts()
+    
     -- Load saved player data
     loadPlayerData()
     musicHandler.loadMenuMusic()
     instructions.load()
-    battleRoyale.load()
+    meteorShower.load()
 
 
     -- load background
@@ -1458,7 +1482,7 @@ function love.load() -- music effect
 
     checkServerStatus()
     jumpGame.load()
-    scoreLobby.init()
+    -- Score lobby removed
 end
 
 function love.update(dt)
@@ -1466,7 +1490,7 @@ function love.update(dt)
     musicHandler.update(dt)
     instructions.update(dt)
     updateScoreDisplay(dt)
-    scoreLobby.update(dt)
+    -- Score lobby removed
     
     -- Sync global currentRound with local currentRound
     if _G.currentRound and _G.currentRound ~= currentRound then
@@ -1484,21 +1508,19 @@ function love.update(dt)
     end
 
 
-    -- Don't allow game transitions when score lobby is showing
-    -- Score lobby handles its own player movement
-    if scoreLobby and scoreLobby.showing then
-        return
-    end
+    -- Score lobby removed
     
     -- Track actual game transitions
     if gameState == "jumpgame" then
         currentPartyGame = "jumpgame"
     elseif gameState == "lasergame" then
         currentPartyGame = "lasergame"
-    elseif gameState == "battleroyale" then
-        currentPartyGame = "battleroyale"
+    elseif gameState == "meteorshower" then
+        currentPartyGame = "meteorshower"
     elseif gameState == "dodgegame" then
         currentPartyGame = "dodgegame"
+    elseif gameState == "praisegame" then
+        currentPartyGame = "praisegame"
     end
 
     -- Check for party mode transition flag (host only)
@@ -1508,8 +1530,8 @@ function love.update(dt)
         debugConsole.addMessage("[PartyMode] Host transitioning to next game")
         
         -- Reset battle royale state
-        battleRoyale.game_over = false
-        battleRoyale.death_animation_done = false
+        meteorShower.game_over = false
+        meteorShower.death_animation_done = false
         
         -- No elimination system in battle royale - players respawn instead
         
@@ -1527,7 +1549,7 @@ function love.update(dt)
         
         -- Start the next game directly (no instructions in party mode transitions)
         if nextGame == "jumpgame" then
-            scoreLobby.forceHide() -- Hide score lobby during transition
+            -- Score lobby removed
             gameState = "jumpgame"
             jumpGame.reset(players)
             jumpGame.setPlayerColor(localPlayer.color)
@@ -1537,7 +1559,7 @@ function love.update(dt)
                 safeSend(client, "start_jump_game")
             end
         elseif nextGame == "lasergame" then
-            scoreLobby.forceHide() -- Hide score lobby during transition
+            -- Score lobby removed
             gameState = "lasergame"
             local seed = os.time() + love.timer.getTime() * 10000
             laserGame.reset()
@@ -1548,25 +1570,25 @@ function love.update(dt)
             for _, client in ipairs(serverClients) do
                 safeSend(client, "start_laser_game," .. seed)
             end
-        elseif nextGame == "battleroyale" then
-            scoreLobby.forceHide() -- Hide score lobby during transition
-            gameState = "battleroyale"
+        elseif nextGame == "meteorshower" then
+            -- Score lobby removed
+            gameState = "meteorshower"
             _G.returnState = returnState
-            _G.gameState = "battleroyale"
+            _G.gameState = "meteorshower"
             _G.players = players
             _G.localPlayer = localPlayer
             initializeRoundWins()
             local seed = os.time() + love.timer.getTime() * 10000
-            battleRoyale.reset()
-            battleRoyale.setSeed(seed)
-            battleRoyale.setPlayerColor(localPlayer.color)
+            meteorShower.reset()
+            meteorShower.setSeed(seed)
+            meteorShower.setPlayerColor(localPlayer.color)
             
             -- Host notifies clients
             for _, client in ipairs(serverClients) do
-                safeSend(client, "start_battleroyale_game," .. seed)
+                safeSend(client, "start_meteorshower_game," .. seed)
             end
         elseif nextGame == "dodgegame" then
-            scoreLobby.forceHide() -- Hide score lobby during transition
+            -- Score lobby removed
             gameState = "dodgegame"
             _G.returnState = returnState
             _G.gameState = "dodgegame"
@@ -1581,6 +1603,23 @@ function love.update(dt)
             -- Host notifies clients
             for _, client in ipairs(serverClients) do
                 safeSend(client, "start_dodge_game," .. seed)
+            end
+        elseif nextGame == "praisegame" then
+            -- Score lobby removed
+            gameState = "praisegame"
+            _G.returnState = returnState
+            _G.gameState = "praisegame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            initializeRoundWins()
+            local seed = os.time() + love.timer.getTime() * 10000
+            praiseGame.reset()
+            praiseGame.setSeed(seed)
+            praiseGame.setPlayerColor(localPlayer.color)
+            
+            -- Host notifies clients
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_praise_game," .. seed)
             end
         end
         
@@ -1597,10 +1636,12 @@ function love.update(dt)
             currentPartyGame = "jumpgame"
         elseif gameState == "lasergame" then
             currentPartyGame = "lasergame"
-        elseif gameState == "battleroyale" then
-            currentPartyGame = "battleroyale"
+        elseif gameState == "meteorshower" then
+            currentPartyGame = "meteorshower"
         elseif gameState == "dodgegame" then
             currentPartyGame = "dodgegame"
+        elseif gameState == "praisegame" then
+            currentPartyGame = "praisegame"
         end
     end
 
@@ -1692,7 +1733,7 @@ function love.update(dt)
             -- Only show score lobby after every 4 games
             if currentRound % maxRounds == 0 then
                 debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
-                scoreLobby.show(currentRound, roundWins, players)
+                -- Score lobby removed
             else
                 -- Increment round for next game (if not showing score lobby)
                 currentRound = currentRound + 1
@@ -1824,7 +1865,7 @@ function love.update(dt)
             -- Only show score lobby after every 4 games
             if currentRound % maxRounds == 0 then
                 debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
-                scoreLobby.show(currentRound, roundWins, players)
+                -- Score lobby removed
             else
                 -- Increment round for next game (if not showing score lobby)
                 currentRound = currentRound + 1
@@ -1851,7 +1892,7 @@ function love.update(dt)
                 debugConsole.addMessage("Party mode transition active, staying in laser game state")
             end
         end
-    elseif gameState == "battleroyale" then
+    elseif gameState == "meteorshower" then
         -- Debug test - show message every 3 seconds
         debugTestTimer = debugTestTimer + dt
         if debugTestTimer >= 3.0 then
@@ -1864,17 +1905,17 @@ function love.update(dt)
             testSyncTimer = testSyncTimer + dt
             if testSyncTimer >= 1.0 then
                 testSyncTimer = 0
-                debugConsole.addMessage("[Host] Meteoroids: " .. #battleRoyale.asteroids .. ", Clients: " .. #serverClients)
+                debugConsole.addMessage("[Host] Meteoroids: " .. #meteorShower.asteroids .. ", Clients: " .. #serverClients)
             end
             updateServer()
         else
             updateClient()
         end
 
-        battleRoyale.update(dt)
+        meteorShower.update(dt)
 
-        if battleRoyale.game_over then
-            debugConsole.addMessage("Battle Royale game over, returning to state: " .. returnState)
+        if meteorShower.game_over then
+            debugConsole.addMessage("Meteor Shower game over, returning to state: " .. returnState)
             
             -- Award round win to player with least deaths (tie handling for first place)
             local minDeaths = 999999  -- Start with a very high number
@@ -1928,7 +1969,7 @@ function love.update(dt)
             -- Only show score lobby after every 4 games
             if currentRound % maxRounds == 0 then
                 debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
-                scoreLobby.show(currentRound, roundWins, players)
+                -- Score lobby removed
             else
                 -- Increment round for next game (if not showing score lobby)
                 currentRound = currentRound + 1
@@ -1940,10 +1981,10 @@ function love.update(dt)
             if not partyMode then
                 gameState = returnState
                 debugConsole.addMessage("Returned to state: " .. gameState)
-                battleRoyale.reset()
+                meteorShower.reset()
             else
                 debugConsole.addMessage("Party mode active, staying in battle royale state for next game")
-                -- Don't reset battleRoyale here - let the transition logic handle it
+                -- Don't reset meteorShower here - let the transition logic handle it
             end
             -- Don't reset partyModeTransitioned here - let the transition logic handle it
         end
@@ -2018,18 +2059,86 @@ function love.update(dt)
             -- Check if we should transition in party mode (only once)
             if partyMode and not partyModeTransitioned then
                 partyModeTransitioned = true
-                -- In dodge game, transition when the timer runs out
                 debugConsole.addMessage("Dodge game finished, transitioning to next game")
-                _G.partyModeTransition = true
-                debugConsole.addMessage("[PartyMode] Set party mode transition flag")
                 
-                -- Host will handle the transition in the main loop
+                -- Get next game from lineup
+                currentGameIndex = currentGameIndex + 1
+                if currentGameIndex > #miniGameLineup then
+                    currentGameIndex = 1 -- Loop back to start
+                end
+                
+                local nextGame = miniGameLineup[currentGameIndex]
+                currentPartyGame = nextGame
+                debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
+                
+                -- Start the next game directly
+                if nextGame == "jumpgame" then
+                    gameState = "jumpgame"
+                    jumpGame.reset(players)
+                    jumpGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_jump_game")
+                    end
+                elseif nextGame == "lasergame" then
+                    gameState = "lasergame"
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    laserGame.load()
+                    laserGame.reset()
+                    laserGame.setSeed(seed)
+                    laserGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_laser_game," .. seed)
+                    end
+                elseif nextGame == "meteorshower" then
+                    gameState = "meteorshower"
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    meteorShower.load()
+                    meteorShower.reset()
+                    meteorShower.setSeed(seed)
+                    meteorShower.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_meteorshower_game," .. seed)
+                    end
+                elseif nextGame == "dodgegame" then
+                    gameState = "dodgegame"
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    dodgeGame.reset()
+                    dodgeGame.setSeed(seed)
+                    dodgeGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_dodge_game," .. seed)
+                    end
+                elseif nextGame == "praisegame" then
+                    gameState = "praisegame"
+                    _G.returnState = returnState
+                    _G.gameState = "praisegame"
+                    _G.players = players
+                    _G.localPlayer = localPlayer
+                    initializeRoundWins()
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    praiseGame.reset()
+                    praiseGame.setSeed(seed)
+                    praiseGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_praise_game," .. seed)
+                    end
+                end
+                
+                -- Send specific game transition to clients
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "party_transition_to," .. nextGame)
+                end
             end
             
             -- Only show score lobby after every 4 games
             if currentRound % maxRounds == 0 then
                 debugConsole.addMessage("[Main] Showing score lobby after round " .. currentRound)
-                scoreLobby.show(currentRound, roundWins, players)
+                -- Score lobby removed
             else
                 -- Increment round for next game (if not showing score lobby)
                 currentRound = currentRound + 1
@@ -2047,6 +2156,54 @@ function love.update(dt)
                 -- Don't reset dodgeGame here - let the transition logic handle it
             end
             -- Don't reset partyModeTransitioned here - let the transition logic handle it
+        end
+    elseif gameState == "praisegame" then
+        praiseGame.update(dt)
+
+        if connected then
+            local message = string.format("praise_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
+                localPlayer.id or 0,
+                praiseGame.player.x,
+                praiseGame.player.y,
+                localPlayer.color[1],
+                localPlayer.color[2],
+                localPlayer.color[3]
+            )
+            if returnState == "hosting" then
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, message)
+                end
+            else
+                safeSend(server, message)
+            end
+        end
+
+        if praiseGame.game_over then
+            debugConsole.addMessage("Praise game over, returning to state: " .. returnState)
+            
+            -- Simple movement game - no scoring needed
+            
+            -- Check if we should transition in party mode (only once)
+            if partyMode and not partyModeTransitioned then
+                partyModeTransitioned = true
+                debugConsole.addMessage("Praise game finished, transitioning to next game")
+                _G.partyModeTransition = true
+                debugConsole.addMessage("[PartyMode] Set party mode transition flag")
+                
+                -- Host will handle the transition in the main loop
+            end
+            
+            -- Only return to lobby if not in party mode
+            if not partyMode then
+                -- Simple movement game - no scoring, just return to lobby
+                if returnState == "hosting" then
+                    gameState = "hosting"
+                    debugConsole.addMessage("[Praise] Returning to hosting lobby")
+                elseif returnState == "playing" then
+                    gameState = "playing"
+                    debugConsole.addMessage("[Praise] Returning to playing lobby")
+                end
+            end
         end
     elseif gameState == "hosting" then
         updateServer()
@@ -2140,15 +2297,15 @@ function updateServer()
     end
 
     -- send battle royale positions
-    if gameState == "battleroyale" then
-        local battleX = battleRoyale.player.x
-        local battleY = battleRoyale.player.y 
+    if gameState == "meteorshower" then
+        local battleX = meteorShower.player.x
+        local battleY = meteorShower.player.y 
         
         -- Include laser data
         local laserData = ""
-        if battleRoyale.lasers and #battleRoyale.lasers > 0 then
+        if meteorShower.lasers and #meteorShower.lasers > 0 then
             local laserStrings = {}
-            for i, laser in ipairs(battleRoyale.lasers) do
+            for i, laser in ipairs(meteorShower.lasers) do
                 table.insert(laserStrings, string.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
                     laser.x, laser.y, laser.vx, laser.vy, laser.time, laser.duration, laser.size))
             end
@@ -2344,15 +2501,15 @@ function updateClient()
         end
 
         -- battle royale positions - send like laser game
-        if gameState == "battleroyale" then
-            local battleX = battleRoyale.player.x
-            local battleY = battleRoyale.player.y
+        if gameState == "meteorshower" then
+            local battleX = meteorShower.player.x
+            local battleY = meteorShower.player.y
             
             -- Include laser data
             local laserData = ""
-            if battleRoyale.lasers and #battleRoyale.lasers > 0 then
+            if meteorShower.lasers and #meteorShower.lasers > 0 then
                 local laserStrings = {}
-                for i, laser in ipairs(battleRoyale.lasers) do
+                for i, laser in ipairs(meteorShower.lasers) do
                     table.insert(laserStrings, string.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
                         laser.x, laser.y, laser.vx, laser.vy, laser.time, laser.duration, laser.size))
                 end
@@ -2377,7 +2534,125 @@ function updateClient()
             localPlayer.color[1], localPlayer.color[2], localPlayer.color[3]))
         end
         
-        
+    elseif gameState == "praisegame" then
+        praiseGame.update(dt)
+
+        if connected then
+            local message = string.format("praise_position,%d,%.2f,%.2f,%.2f,%.2f,%.2f",
+                localPlayer.id or 0,
+                praiseGame.player.x,
+                praiseGame.player.y,
+                localPlayer.color[1],
+                localPlayer.color[2],
+                localPlayer.color[3]
+            )
+            if returnState == "hosting" then
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, message)
+                end
+            else
+                safeSend(server, message)
+            end
+        end
+
+        if praiseGame.game_over then
+            debugConsole.addMessage("Praise game over, returning to state: " .. returnState)
+            
+            -- Check if we should transition in party mode (only once)
+            if partyMode and not partyModeTransitioned then
+                partyModeTransitioned = true
+                debugConsole.addMessage("Praise game finished, transitioning to next game")
+                
+                -- Get next game from lineup
+                currentGameIndex = currentGameIndex + 1
+                if currentGameIndex > #miniGameLineup then
+                    currentGameIndex = 1 -- Loop back to start
+                end
+                
+                local nextGame = miniGameLineup[currentGameIndex]
+                currentPartyGame = nextGame
+                debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
+                
+                -- Start the next game directly
+                if nextGame == "jumpgame" then
+                    gameState = "jumpgame"
+                    jumpGame.reset(players)
+                    jumpGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_jump_game")
+                    end
+                elseif nextGame == "lasergame" then
+                    gameState = "lasergame"
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    laserGame.setSeed(seed)
+                    laserGame.reset(players)
+                    laserGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_laser_game," .. seed)
+                    end
+                elseif nextGame == "meteorshower" then
+                    gameState = "meteorshower"
+                    _G.returnState = returnState
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    meteorShower.setSeed(seed)
+                    meteorShower.reset(players)
+                    meteorShower.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_meteorshower_game," .. seed)
+                    end
+                elseif nextGame == "dodgegame" then
+                    gameState = "dodgegame"
+                    _G.returnState = returnState
+                    _G.gameState = "dodgegame"
+                    _G.players = players
+                    _G.localPlayer = localPlayer
+                    initializeRoundWins()
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    dodgeGame.reset()
+                    dodgeGame.setSeed(seed)
+                    dodgeGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_dodge_game," .. seed)
+                    end
+                elseif nextGame == "praisegame" then
+                    gameState = "praisegame"
+                    _G.returnState = returnState
+                    _G.gameState = "praisegame"
+                    _G.players = players
+                    _G.localPlayer = localPlayer
+                    initializeRoundWins()
+                    local seed = os.time() + love.timer.getTime() * 10000
+                    praiseGame.reset()
+                    praiseGame.setSeed(seed)
+                    praiseGame.setPlayerColor(localPlayer.color)
+                    
+                    for _, client in ipairs(serverClients) do
+                        safeSend(client, "start_praise_game," .. seed)
+                    end
+                end
+                
+                -- Send specific game transition to clients
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "party_transition_to," .. nextGame)
+                end
+            end
+            
+            -- Only return to lobby if not in party mode transition
+            if not partyMode then
+                -- Simple movement game - no scoring, just return to lobby
+                if returnState == "hosting" then
+                    gameState = "hosting"
+                    debugConsole.addMessage("[Praise] Returning to hosting lobby")
+                elseif returnState == "playing" then
+                    gameState = "playing"
+                    debugConsole.addMessage("[Praise] Returning to playing lobby")
+                end
+            end
+        end
     end
 end
 
@@ -2395,12 +2670,12 @@ function love.draw()
         love.graphics.scale(scale, scale)
         laserGame.draw(players, localPlayer.id)
         love.graphics.pop()
-    elseif gameState == "battleroyale" then
+    elseif gameState == "meteorshower" then
         love.graphics.push()
         love.graphics.translate(offsetX, offsetY)
         love.graphics.scale(scale, scale)
         debugConsole.addMessage("[Draw] Drawing battle royale game")
-        battleRoyale.draw(players, localPlayer.id)
+        meteorShower.draw(players, localPlayer.id)
         love.graphics.pop()
     elseif gameState == "dodgegame" then
         love.graphics.push()
@@ -2408,6 +2683,13 @@ function love.draw()
         love.graphics.scale(scale, scale)
         debugConsole.addMessage("[Draw] Drawing dodge game")
         dodgeGame.draw(players, localPlayer.id)
+        love.graphics.pop()
+    elseif gameState == "praisegame" then
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(scale, scale)
+        debugConsole.addMessage("[Draw] Drawing praise game")
+        praiseGame.draw(players, localPlayer.id)
         love.graphics.pop()
     elseif gameState == "menu" then
         love.graphics.push()
@@ -2586,21 +2868,10 @@ function love.draw()
     love.graphics.print(string.format("FPS: %d", fps), 
         love.graphics.getWidth() - 80, 30)
 
-    -- Draw connection info (hidden when score lobby is showing)
-    if not (scoreLobby and scoreLobby.showing) then
+    -- Draw connection info
         love.graphics.setColor(1, 1, 1)
         love.graphics.print("Game State: " .. gameState, 10, 30)
         love.graphics.print("Players: " .. #table_keys(players), 10, 50)
-    end
-
-    -- Draw score lobby if showing (with scaling)
-    if scoreLobby.showing then
-        love.graphics.push()
-        love.graphics.translate(offsetX, offsetY)
-        love.graphics.scale(scale, scale)
-        scoreLobby.draw()
-        love.graphics.pop()
-    end
     
     -- Draw score display if showing
     drawScoreDisplay()
@@ -2709,17 +2980,17 @@ function love.mousepressed(x, y, button)
                 gameState = "connecting"
                 buttons.start.visible = true
             elseif isMouseOver(buttons.back_play, baseX, baseY) then
-                scoreLobby.forceHide() -- Hide score lobby when returning to menu
+                -- Score lobby removed
                 gameState = "menu"
             end
         elseif gameState == "settings_menu" then
             if isMouseOver(buttons.back_settings, baseX, baseY) then
-                scoreLobby.forceHide() -- Hide score lobby when returning to menu
+                -- Score lobby removed
                 gameState = "menu"
             end
         elseif gameState == "customize_menu" then
             if isMouseOver(buttons.back_customize, baseX, baseY) then
-                scoreLobby.forceHide() -- Hide score lobby when returning to menu
+                -- Score lobby removed
                 gameState = "menu"
             end
         elseif gameState == "customization" then
@@ -2789,12 +3060,12 @@ function love.mousepressed(x, y, button)
                     buttons.start.visible = true
                 elseif afterCustomization == "customize_only" then
                     debugConsole.addMessage("[Customization] Returning to main menu")
-                    scoreLobby.forceHide() -- Hide score lobby when returning to menu
+                    -- Score lobby removed
                     gameState = "menu"
                 end
             elseif result == "cancel" then
                 debugConsole.addMessage("[Customization] Cancelled, returning to main menu")
-                scoreLobby.forceHide() -- Hide score lobby when returning to menu
+                -- Score lobby removed
                 gameState = "menu"
             end
         elseif gameState == "connecting" and isMouseOver(buttons.start) then
@@ -2862,9 +3133,9 @@ function love.keypressed(key)
 
 
     -- Handle spacebar specifically for battle royale
-    if gameState == "battleroyale" and (key == " " or key == "space") then
-        debugConsole.addMessage("[Main] Spacebar detected in battle royale, calling battleRoyale.keypressed")
-        battleRoyale.keypressed(key)
+    if gameState == "meteorshower" and (key == " " or key == "space") then
+        debugConsole.addMessage("[Main] Spacebar detected in battle royale, calling meteorShower.keypressed")
+        meteorShower.keypressed(key)
         return
     end
 
@@ -2957,7 +3228,7 @@ function love.keypressed(key)
                     
                     -- Add individual game votes
                     for levelIdx, voteList in pairs(levelSelector.votes) do
-                        if #voteList > 0 and levelIdx <= 4 then -- Only actual games, not Race Game
+                        if #voteList > 0 and levelIdx <= 5 then -- Include Praise Game (index 5)
                             for i = 1, #voteList do -- Add each vote as a chance
                                 table.insert(votedOptions, "game_" .. levelIdx)
                             end
@@ -3050,24 +3321,24 @@ function love.keypressed(key)
                                         safeSend(client, "start_laser_game")
                                     end
                                 end)
-                            elseif firstGame == "battleroyale" then
+                            elseif firstGame == "meteorshower" then
                                 -- Notify clients BEFORE showing host instructions
                                 for _, client in ipairs(serverClients) do
                                     safeSend(client, "show_battle_royale_instructions")
                                 end
                                 
-                                instructions.show("battleroyale", function()
-                                    gameState = "battleroyale"
+                                instructions.show("meteorshower", function()
+                                    gameState = "meteorshower"
                                     returnState = "hosting"
                                     _G.returnState = "hosting"
                                     initializeRoundWins()
-                                    battleRoyale.load()
-                                    battleRoyale.reset()
-                                    battleRoyale.setPlayerColor(localPlayer.color)
+                                    meteorShower.load()
+                                    meteorShower.reset()
+                                    meteorShower.setPlayerColor(localPlayer.color)
 
                                     -- Only send game start after instructions
                                     for _, client in ipairs(serverClients) do
-                                        safeSend(client, "start_battleroyale_game")
+                                        safeSend(client, "start_meteorshower_game")
                                     end
                                 end)
                             elseif firstGame == "dodgegame" then
@@ -3182,24 +3453,24 @@ function love.keypressed(key)
                                     safeSend(client, "start_laser_game")
                                 end
                             end)
-                        elseif firstGame == "battleroyale" then
+                        elseif firstGame == "meteorshower" then
                             -- Notify clients BEFORE showing host instructions
                             for _, client in ipairs(serverClients) do
                                 safeSend(client, "show_battle_royale_instructions")
                             end
                             
-                            instructions.show("battleroyale", function()
-                                gameState = "battleroyale"
+                            instructions.show("meteorshower", function()
+                                gameState = "meteorshower"
                                 returnState = "hosting"
                                 _G.returnState = "hosting"
                                 initializeRoundWins()
-                                battleRoyale.load()
-                                battleRoyale.reset()
-                                battleRoyale.setPlayerColor(localPlayer.color)
+                                meteorShower.load()
+                                meteorShower.reset()
+                                meteorShower.setPlayerColor(localPlayer.color)
 
                                 -- Only send game start after instructions
                                 for _, client in ipairs(serverClients) do
-                                    safeSend(client, "start_battleroyale_game")
+                                    safeSend(client, "start_meteorshower_game")
                                 end
                             end)
                         elseif firstGame == "dodgegame" then
@@ -3278,21 +3549,21 @@ function love.keypressed(key)
                             safeSend(client, "show_battle_royale_instructions")
                         end
                         
-                        instructions.show("battleroyale", function()
-                            gameState = "battleroyale"
+                        instructions.show("meteorshower", function()
+                            gameState = "meteorshower"
                             returnState = "hosting"
                             _G.returnState = "hosting"
                             initializeRoundWins()
                             local seed = os.time() + love.timer.getTime() * 10000
-                            battleRoyale.load()
-                            battleRoyale.reset()
-                            battleRoyale.setSeed(seed)
-                            battleRoyale.setPlayerColor(localPlayer.color)
-                            debugConsole.addMessage("[Game] Started Battle Royale")
+                            meteorShower.load()
+                            meteorShower.reset()
+                            meteorShower.setSeed(seed)
+                            meteorShower.setPlayerColor(localPlayer.color)
+                            debugConsole.addMessage("[Game] Started Meteor Shower")
                             
                             -- Notify clients to start battle royale
                             for _, client in ipairs(serverClients) do
-                                safeSend(client, "start_battleroyale_game," .. seed)
+                                safeSend(client, "start_meteorshower_game," .. seed)
                             end
                         end)
                     elseif selectedGameIndex == 4 then
@@ -3319,6 +3590,32 @@ function love.keypressed(key)
                             end
                         end)
                     elseif selectedGameIndex == 5 then
+                        -- Praise Game option - launch the praise game
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_praise_instructions")
+                        end
+                        
+                        instructions.show("praisegame", function()
+                            gameState = "praisegame"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            _G.gameState = "praisegame"
+                            _G.players = players
+                            _G.localPlayer = localPlayer
+                            initializeRoundWins()
+                            local seed = math.random(1000000)
+                            praiseGame.reset()
+                            praiseGame.setSeed(seed)
+                            praiseGame.setPlayerColor(localPlayer.color)
+                            debugConsole.addMessage("[Game] Started Praise Game")
+                            
+                            -- Notify clients to start praise game
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_praise_game," .. seed)
+                            end
+                        end)
+                    elseif selectedGameIndex == 6 then
                         -- Race Game option - launch the actual race game (standalone, not in party mode)
                         -- Notify clients BEFORE showing host instructions
                         for _, client in ipairs(serverClients) do
@@ -3436,24 +3733,24 @@ function love.keypressed(key)
                                 safeSend(client, "start_laser_game")
                             end
                         end)
-                    elseif firstGame == "battleroyale" then
+                    elseif firstGame == "meteorshower" then
                         -- Notify clients BEFORE showing host instructions
                         for _, client in ipairs(serverClients) do
                             safeSend(client, "show_battle_royale_instructions")
                         end
                         
-                        instructions.show("battleroyale", function()
-                            gameState = "battleroyale"
+                        instructions.show("meteorshower", function()
+                            gameState = "meteorshower"
                             returnState = "hosting"
                             _G.returnState = "hosting"
                             initializeRoundWins()
-                            battleRoyale.load()
-                            battleRoyale.reset()
-                            battleRoyale.setPlayerColor(localPlayer.color)
+                            meteorShower.load()
+                            meteorShower.reset()
+                            meteorShower.setPlayerColor(localPlayer.color)
 
                             -- Only send game start after instructions
                             for _, client in ipairs(serverClients) do
-                                    safeSend(client, "start_battleroyale_game")
+                                    safeSend(client, "start_meteorshower_game")
                             end
                         end)
                     elseif firstGame == "dodgegame" then
@@ -3546,21 +3843,21 @@ function love.keypressed(key)
                             safeSend(client, "show_battle_royale_instructions")
                         end
                         
-                        instructions.show("battleroyale", function()
-                            gameState = "battleroyale"
+                        instructions.show("meteorshower", function()
+                            gameState = "meteorshower"
                             returnState = "hosting"
                             _G.returnState = "hosting"
                             initializeRoundWins()
                             local seed = os.time() + love.timer.getTime() * 10000
-                            battleRoyale.load()
-                            battleRoyale.reset()
-                            battleRoyale.setSeed(seed)
-                            battleRoyale.setPlayerColor(localPlayer.color)
-                            debugConsole.addMessage("[Game] Started Battle Royale")
+                            meteorShower.load()
+                            meteorShower.reset()
+                            meteorShower.setSeed(seed)
+                            meteorShower.setPlayerColor(localPlayer.color)
+                            debugConsole.addMessage("[Game] Started Meteor Shower")
                             
                             -- Notify clients to start battle royale
                             for _, client in ipairs(serverClients) do
-                                safeSend(client, "start_battleroyale_game," .. seed)
+                                safeSend(client, "start_meteorshower_game," .. seed)
                             end
                         end)
                     elseif selectedGameIndex == 4 then
@@ -3587,6 +3884,32 @@ function love.keypressed(key)
                             end
                         end)
                     elseif selectedGameIndex == 5 then
+                        -- Praise Game option - launch the praise game
+                        -- Notify clients BEFORE showing host instructions
+                        for _, client in ipairs(serverClients) do
+                            safeSend(client, "show_praise_instructions")
+                        end
+                        
+                        instructions.show("praisegame", function()
+                            gameState = "praisegame"
+                            returnState = "hosting"
+                            _G.returnState = "hosting"
+                            _G.gameState = "praisegame"
+                            _G.players = players
+                            _G.localPlayer = localPlayer
+                            initializeRoundWins()
+                            local seed = math.random(1000000)
+                            praiseGame.reset()
+                            praiseGame.setSeed(seed)
+                            praiseGame.setPlayerColor(localPlayer.color)
+                            debugConsole.addMessage("[Game] Started Praise Game")
+                            
+                            -- Notify clients to start praise game
+                            for _, client in ipairs(serverClients) do
+                                safeSend(client, "start_praise_game," .. seed)
+                            end
+                        end)
+                    elseif selectedGameIndex == 6 then
                         -- Race Game option - launch the actual race game (standalone, not in party mode)
                         -- Notify clients BEFORE showing host instructions
                         for _, client in ipairs(serverClients) do
@@ -3707,7 +4030,7 @@ function love.keypressed(key)
         end
         
         -- Update lastSelectedGame if we're selecting an actual game (not Race Game)
-        if levelSelector.selectedLevel <= 4 then
+        if levelSelector.selectedLevel <= 5 then
             levelSelector.lastSelectedGame = levelSelector.selectedLevel
             debugConsole.addMessage("[LevelSelector] Updated lastSelectedGame to: " .. levelSelector.selectedLevel .. " (" .. levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel].name .. ")")
         end
@@ -3856,17 +4179,17 @@ function love.keypressed(key)
                 safeSend(client, "start_laser_game," .. seed)
             end
         elseif levelSelector.selectedLevel == 3 then
-            gameState = "battleroyale"
+            gameState = "meteorshower"
             local seed = os.time() + love.timer.getTime() * 10000
-            battleRoyale.load()
-            battleRoyale.reset()
-            battleRoyale.setSeed(seed)
-            battleRoyale.setPlayerColor(localPlayer.color)
+            meteorShower.load()
+            meteorShower.reset()
+            meteorShower.setSeed(seed)
+            meteorShower.setPlayerColor(localPlayer.color)
             debugConsole.addMessage("[Game] Started Battle Royale")
             
             -- Notify clients to start battle royale
             for _, client in ipairs(serverClients) do
-                safeSend(client, "start_battleroyale_game," .. seed)
+                safeSend(client, "start_meteorshower_game," .. seed)
             end
         elseif levelSelector.selectedLevel == 4 then
             gameState = "dodgegame"
@@ -3882,6 +4205,24 @@ function love.keypressed(key)
                 safeSend(client, "start_dodge_game," .. seed)
             end
         elseif levelSelector.selectedLevel == 5 then
+            -- Praise Game option - launch the praise game
+            gameState = "praisegame"
+            _G.returnState = "hosting"
+            _G.gameState = "praisegame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            initializeRoundWins()
+            local seed = os.time() + love.timer.getTime() * 10000
+            praiseGame.reset()
+            praiseGame.setSeed(seed)
+            praiseGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Game] Started Praise Game")
+            
+            -- Notify clients to start praise game
+            for _, client in ipairs(serverClients) do
+                safeSend(client, "start_praise_game," .. seed)
+            end
+        elseif levelSelector.selectedLevel == 6 then
             -- Race Game option - launch the actual race game (standalone, not in party mode)
             gameState = "racegame"
             raceGame.load()
@@ -3973,9 +4314,9 @@ function love.keypressed(key)
                     for _, client in ipairs(serverClients) do
                         safeSend(client, "start_laser_game," .. seed)
                     end
-                elseif firstGame == "battleroyale" then
-                    battleRoyale.load()
-                    battleRoyale.setPlayerColor(localPlayer.color)
+                elseif firstGame == "meteorshower" then
+                    meteorShower.load()
+                    meteorShower.setPlayerColor(localPlayer.color)
                     for _, client in ipairs(serverClients) do
                         safeSend(client, "start_battle_royale")
                     end
@@ -4013,9 +4354,7 @@ function love.keypressed(key)
     end
 
     -- Handle score lobby skip
-    if scoreLobby.keypressed(key) then
-        return
-    end
+    -- Score lobby removed
 
     -- Handle score display skip
     if showScoreDisplay then
@@ -4027,16 +4366,14 @@ function love.keypressed(key)
     end
 
     -- Battle royale spacebar handled above, other keys handled here
-    if gameState == "battleroyale" and key ~= " " and key ~= "space" then
-        battleRoyale.keypressed(key)
+    if gameState == "meteorshower" and key ~= " " and key ~= "space" then
+        meteorShower.keypressed(key)
     end
 end
 
 function love.keyreleased(key)
     -- Handle score lobby key release
-    if scoreLobby.keyreleased and scoreLobby.keyreleased(key) then
-        return
-    end
+    -- Score lobby removed
     
     -- Handle TAB key release for tab menu
     if key == "tab" then
@@ -4183,7 +4520,7 @@ function handleDisconnection()
     if gameState == "jumpgame" then
         jumpGame.game_over = true
     end
-    scoreLobby.forceHide() -- Hide score lobby on disconnection
+    -- Score lobby removed
     gameState = "menu"
     connected = false
     players = {}
@@ -4214,28 +4551,20 @@ function handleServerMessage(id, data)
         end
         
         -- Show score lobby for all players
-        if scoreLobby and players then
-            scoreLobby.show(roundNumber, roundWins, players)
-            debugConsole.addMessage("[Server] Showing score lobby for round " .. roundNumber)
-        end
+        -- Score lobby removed
         return
     end
     
     -- Handle quit to lobby message
     if data == "quit_to_lobby" then
-        if scoreLobby and scoreLobby.showing then
-            scoreLobby.hide()
-            debugConsole.addMessage("[Client] Quitting to lobby from score lobby")
-        end
+        -- Score lobby removed
         return
     end
     
     -- Handle score lobby vote message
     if data:match("^score_lobby_vote,(%d+)") then
         local playerId = tonumber(data:match("^score_lobby_vote,(%d+)"))
-        if scoreLobby and scoreLobby.handleVote then
-            scoreLobby.handleVote(playerId)
-        end
+        -- Score lobby removed
         return
     end
     
@@ -4264,6 +4593,22 @@ function handleServerMessage(id, data)
             end
             players[playerId].laserHits = hits
             debugConsole.addMessage("[Server] Player " .. playerId .. " laser hits: " .. hits)
+        end
+        return
+    end
+    
+    if data:match("^praise_counts_sync,(%d+),(%d+),(%d+)") then
+        local playerId, praiseCount, belittleCount = data:match("^praise_counts_sync,(%d+),(%d+),(%d+)")
+        playerId = tonumber(playerId)
+        praiseCount = tonumber(praiseCount)
+        belittleCount = tonumber(belittleCount)
+        if playerId and praiseCount and belittleCount then
+            if not players[playerId] then
+                players[playerId] = {}
+            end
+            players[playerId].praiseCount = praiseCount
+            players[playerId].belittleCount = belittleCount
+            debugConsole.addMessage("[Server] Player " .. playerId .. " praise: " .. praiseCount .. ", belittle: " .. belittleCount)
         end
         return
     end
@@ -4315,7 +4660,7 @@ function handleServerMessage(id, data)
         return
     end
 
-    -- Legacy battleroyale score handling removed - scores are now handled through round wins
+    -- Legacy meteorshower score handling removed - scores are now handled through round wins
 
     -- Handle jump game positions
     if data:match("jump_position,(%d+),([-%d.]+),([-%d.]+),([%d.]+),([%d.]+),([%d.]+)") then
@@ -4565,24 +4910,24 @@ function handleServerMessage(id, data)
                     safeSend(client, "start_laser_game")
                 end
             end)
-        elseif firstGame == "battleroyale" then
+        elseif firstGame == "meteorshower" then
             -- Notify clients BEFORE showing host instructions
             for _, client in ipairs(serverClients) do
                 safeSend(client, "show_battle_royale_instructions")
             end
             
-            instructions.show("battleroyale", function()
-                gameState = "battleroyale"
+            instructions.show("meteorshower", function()
+                gameState = "meteorshower"
                 returnState = "hosting"
                 _G.returnState = "hosting"
                 initializeRoundWins()
-                battleRoyale.load()
-                battleRoyale.reset()
-                battleRoyale.setPlayerColor(localPlayer.color)
+                meteorShower.load()
+                meteorShower.reset()
+                meteorShower.setPlayerColor(localPlayer.color)
 
                 -- Only send game start after instructions
                 for _, client in ipairs(serverClients) do
-                    safeSend(client, "start_battleroyale_game")
+                    safeSend(client, "start_meteorshower_game")
                 end
             end)
         elseif firstGame == "dodgegame" then
@@ -4809,19 +5154,19 @@ function handleClientMessage(data)
     if data:match("^game_state_sync,") then
         debugConsole.addMessage("[Client] DETECTED game_state_sync message!")
     end
-    if data:match("^start_battleroyale_game,") then
-        local seed = tonumber(data:match("^start_battleroyale_game,(%d+)"))
+    if data:match("^start_meteorshower_game,") then
+        local seed = tonumber(data:match("^start_meteorshower_game,(%d+)"))
         debugConsole.addMessage("[Client] RECEIVED BATTLE ROYALE START MESSAGE with seed: " .. seed)
         if seed then
-            gameState = "battleroyale"
+            gameState = "meteorshower"
             returnState = "playing"
             _G.returnState = "playing"
-            _G.gameState = "battleroyale"
+            _G.gameState = "meteorshower"
             _G.players = players
             _G.localPlayer = localPlayer
-            battleRoyale.reset()
-            battleRoyale.setSeed(seed)
-            battleRoyale.setPlayerColor(localPlayer.color)
+            meteorShower.reset()
+            meteorShower.setSeed(seed)
+            meteorShower.setPlayerColor(localPlayer.color)
             debugConsole.addMessage("[Client] Battle royale game state set to: " .. gameState)
             debugConsole.addMessage("[Client] Battle royale loaded successfully with seed: " .. seed)
         end
@@ -4843,6 +5188,25 @@ function handleClientMessage(data)
             dodgeGame.setPlayerColor(localPlayer.color)
             debugConsole.addMessage("[Client] Dodge game state set to: " .. gameState)
             debugConsole.addMessage("[Client] Dodge game loaded successfully with seed: " .. seed)
+        end
+        return
+    end
+    
+    if data:match("^start_praise_game,") then
+        local seed = tonumber(data:match("^start_praise_game,(%d+)"))
+        debugConsole.addMessage("[Client] RECEIVED PRAISE GAME START MESSAGE with seed: " .. seed)
+        if seed then
+            gameState = "praisegame"
+            returnState = "playing"
+            _G.returnState = "playing"
+            _G.gameState = "praisegame"
+            _G.players = players
+            _G.localPlayer = localPlayer
+            praiseGame.reset()
+            praiseGame.setSeed(seed)
+            praiseGame.setPlayerColor(localPlayer.color)
+            debugConsole.addMessage("[Client] Praise game state set to: " .. gameState)
+            debugConsole.addMessage("[Client] Praise game loaded successfully with seed: " .. seed)
         end
         return
     end
@@ -4874,24 +5238,32 @@ function handleClientMessage(data)
         elseif nextGame == "lasergame" then
             gameState = "lasergame"
             -- Client will receive seed in start_laser_game message
-        elseif nextGame == "battleroyale" then
-            gameState = "battleroyale"
-            -- Client will receive seed in start_battleroyale_game message
+        elseif nextGame == "meteorshower" then
+            gameState = "meteorshower"
+            -- Client will receive seed in start_meteorshower_game message
         elseif nextGame == "dodgegame" then
             gameState = "dodgegame"
             -- Client will receive seed in start_dodge_game message
+        elseif nextGame == "praisegame" then
+            gameState = "praisegame"
+            -- Client will receive seed in start_praise_game message
         end
         return
     end
     
     
-    if data == "show_battleroyale_instructions" then
-        instructions.show("battleroyale", function() end)
+    if data == "show_meteorshower_instructions" then
+        instructions.show("meteorshower", function() end)
         return
     end
     
     if data == "show_dodge_instructions" then
         instructions.show("dodgegame", function() end)
+        return
+    end
+    
+    if data == "show_praise_instructions" then
+        instructions.show("praisegame", function() end)
         return
     end
     
@@ -4917,7 +5289,7 @@ function handleClientMessage(data)
         return
     end
 
-    -- Legacy battleroyale score handling removed - scores are now handled through round wins
+    -- Legacy meteorshower score handling removed - scores are now handled through round wins
 
     -- Handle game-specific scores for winner determination
     if data:match("^jump_score_sync,(%d+),(%d+)") then
@@ -4944,6 +5316,22 @@ function handleClientMessage(data)
             end
             players[playerId].laserHits = hits
             debugConsole.addMessage("[Client] Player " .. playerId .. " laser hits: " .. hits)
+        end
+        return
+    end
+    
+    if data:match("^praise_counts_sync,(%d+),(%d+),(%d+)") then
+        local playerId, praiseCount, belittleCount = data:match("^praise_counts_sync,(%d+),(%d+),(%d+)")
+        playerId = tonumber(playerId)
+        praiseCount = tonumber(praiseCount)
+        belittleCount = tonumber(belittleCount)
+        if playerId and praiseCount and belittleCount then
+            if not players[playerId] then
+                players[playerId] = {}
+            end
+            players[playerId].praiseCount = praiseCount
+            players[playerId].belittleCount = belittleCount
+            debugConsole.addMessage("[Client] Player " .. playerId .. " praise: " .. praiseCount .. ", belittle: " .. belittleCount)
         end
         return
     end
@@ -5052,12 +5440,12 @@ function handleClientMessage(data)
             local gameTime = tonumber(parts[7])
             
             -- Update safe zone
-            battleRoyale.center_x = center_x
-            battleRoyale.center_y = center_y
-            battleRoyale.safe_zone_radius = radius
+            meteorShower.center_x = center_x
+            meteorShower.center_y = center_y
+            meteorShower.safe_zone_radius = radius
             
             -- Update game timer
-            battleRoyale.timer = gameTime
+            meteorShower.timer = gameTime
             
             debugConsole.addMessage("[Client] Updated safe zone: " .. center_x .. "," .. center_y .. "," .. radius)
             debugConsole.addMessage("[Client] Updated timer: " .. gameTime)
@@ -5385,33 +5773,33 @@ function handleClientMessage(data)
             musicColorIndex = tonumber(musicColorIndex)
             
             -- Sync game state with host
-            battleRoyale.gameTime = gameTime
-            battleRoyale.current_color_index = colorIndex
-            battleRoyale.current_direction_index = directionIndex
-            battleRoyale.beat_count = beatCount
-            battleRoyale.current_change_rate = changeRate
-            battleRoyale.change_duration = changeDuration
-            battleRoyale.music_asteroid_color_index = musicColorIndex
+            meteorShower.gameTime = gameTime
+            meteorShower.current_color_index = colorIndex
+            meteorShower.current_direction_index = directionIndex
+            meteorShower.beat_count = beatCount
+            meteorShower.current_change_rate = changeRate
+            meteorShower.change_duration = changeDuration
+            meteorShower.music_asteroid_color_index = musicColorIndex
             
             -- Set target positions for smooth interpolation
-            battleRoyale.target_center_x = centerX
-            battleRoyale.target_center_y = centerY
+            meteorShower.target_center_x = centerX
+            meteorShower.target_center_y = centerY
             
             -- Smooth radius changes - only update if change is significant
-            local radius_diff = math.abs(radius - (battleRoyale.target_radius or battleRoyale.safe_zone_radius))
+            local radius_diff = math.abs(radius - (meteorShower.target_radius or meteorShower.safe_zone_radius))
             if radius_diff > 1.0 then -- Only update if radius changed by more than 1 pixel
-                battleRoyale.target_radius = radius
+                meteorShower.target_radius = radius
             end
             
             -- Update safe zone direction based on synced direction index
-            battleRoyale.safe_zone_direction = battleRoyale.safety_ring_directions[directionIndex]
+            meteorShower.safe_zone_direction = meteorShower.safety_ring_directions[directionIndex]
             
             -- Only log sync every 60 updates (once per second) to avoid spam
-            if not battleRoyale.sync_log_timer then battleRoyale.sync_log_timer = 0 end
-            battleRoyale.sync_log_timer = battleRoyale.sync_log_timer + 1
-            if battleRoyale.sync_log_timer >= 60 then
+            if not meteorShower.sync_log_timer then meteorShower.sync_log_timer = 0 end
+            meteorShower.sync_log_timer = meteorShower.sync_log_timer + 1
+            if meteorShower.sync_log_timer >= 60 then
                 debugConsole.addMessage("[Client] Synced game state: time=" .. gameTime .. ", center=(" .. centerX .. "," .. centerY .. "), radius=" .. radius .. ", color=" .. colorIndex .. ", direction=" .. directionIndex .. ", beats=" .. beatCount .. ", changeRate=" .. changeRate .. ", changeDuration=" .. changeDuration)
-                battleRoyale.sync_log_timer = 0
+                meteorShower.sync_log_timer = 0
             end
         end
         return
@@ -5530,19 +5918,14 @@ function handleClientMessage(data)
 
     -- Handle quit to lobby message
     if data == "quit_to_lobby" then
-        if scoreLobby and scoreLobby.showing then
-            scoreLobby.hide()
-            debugConsole.addMessage("[Client] Quitting to lobby from score lobby")
-        end
+        -- Score lobby removed
         return
     end
     
     -- Handle score lobby vote message
     if data:match("^score_lobby_vote,(%d+)") then
         local playerId = tonumber(data:match("^score_lobby_vote,(%d+)"))
-        if scoreLobby and scoreLobby.handleVote then
-            scoreLobby.handleVote(playerId)
-        end
+        -- Score lobby removed
         return
     end
 
