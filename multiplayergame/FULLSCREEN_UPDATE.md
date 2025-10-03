@@ -39,3 +39,4 @@
 - Game mechanics are preserved at all scales
 
 The game now provides a much better experience on modern displays while maintaining the original gameplay mechanics!
+

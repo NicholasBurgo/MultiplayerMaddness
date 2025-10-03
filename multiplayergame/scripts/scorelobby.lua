@@ -26,16 +26,7 @@ scoreLobby.textAnimation = {
     lastPlacePlayer = nil
 }
 
--- Exit voting system
-scoreLobby.voting = {
-    votes = {}, -- Track who has voted to quit
-    spaceHeld = false,
-    holdTimer = 0,
-    holdDuration = 1.5, -- Hold space for 1.5 seconds to vote
-    hasVoted = false,
-    totalPlayers = 0,
-    votesNeeded = 0
-}
+-- Voting system removed
 
 -- Initialize score lobby
 function scoreLobby.init()
@@ -118,25 +109,67 @@ function scoreLobby.initTextAnimation()
     end
 end
 
--- Initialize voting system
-function scoreLobby.initVoting()
-    scoreLobby.voting.votes = {}
-    scoreLobby.voting.spaceHeld = false
-    scoreLobby.voting.holdTimer = 0
-    scoreLobby.voting.hasVoted = false
+-- Update player movement (like other games)
+function scoreLobby.updatePlayerMovement(dt)
+    if not _G.localPlayer or not _G.localPlayer.id then return end
     
-    -- Count total players and calculate votes needed (2/3 majority)
-    scoreLobby.voting.totalPlayers = 0
-    for id, player in pairs(scoreLobby.players) do
-        scoreLobby.voting.totalPlayers = scoreLobby.voting.totalPlayers + 1
+    local moveSpeed = 200 -- Same speed as main.lua lobby movement
+    local moved = false
+    
+    -- Handle WASD movement (like other games)
+    if love.keyboard.isDown('w') then
+        _G.localPlayer.y = _G.localPlayer.y - moveSpeed * dt
+        moved = true
+    end
+    if love.keyboard.isDown('s') then
+        _G.localPlayer.y = _G.localPlayer.y + moveSpeed * dt
+        moved = true
+    end
+    if love.keyboard.isDown('a') then
+        _G.localPlayer.x = _G.localPlayer.x - moveSpeed * dt
+        moved = true
+    end
+    if love.keyboard.isDown('d') then
+        _G.localPlayer.x = _G.localPlayer.x + moveSpeed * dt
+        moved = true
     end
     
-    -- Calculate votes needed (2/3 majority, rounded up)
-    scoreLobby.voting.votesNeeded = math.ceil(scoreLobby.voting.totalPlayers * 2 / 3)
+    -- Keep player within screen bounds
+    _G.localPlayer.x = math.max(0, math.min(_G.BASE_WIDTH - 30, _G.localPlayer.x))
+    _G.localPlayer.y = math.max(0, math.min(_G.BASE_HEIGHT - 30, _G.localPlayer.y))
     
-    if _G.debugConsole and _G.debugConsole.addMessage then
-        _G.debugConsole.addMessage(string.format("[Voting] Total players: %d, Votes needed: %d", 
-            scoreLobby.voting.totalPlayers, scoreLobby.voting.votesNeeded))
+    -- Update the players table with new position (CRITICAL!)
+    if moved and scoreLobby.players and scoreLobby.players[_G.localPlayer.id] then
+        scoreLobby.players[_G.localPlayer.id].x = _G.localPlayer.x
+        scoreLobby.players[_G.localPlayer.id].y = _G.localPlayer.y
+        
+        if _G.debugConsole and _G.debugConsole.addMessage then
+            _G.debugConsole.addMessage(string.format("[ScoreLobby] Updated player %d position to (%.1f, %.1f)", 
+                _G.localPlayer.id, _G.localPlayer.x, _G.localPlayer.y))
+        end
+    end
+    
+    -- Send position update to server (like main.lua does)
+    if moved and _G.localPlayer.id and (_G.gameState == "playing" or _G.gameState == "hosting") then
+        if _G.gameState == "playing" and _G.server and _G.safeSend then
+            _G.safeSend(_G.server, string.format("%d,%d,%d,%.2f,%.2f,%.2f",
+                _G.localPlayer.id,
+                math.floor(_G.localPlayer.x),
+                math.floor(_G.localPlayer.y),
+                _G.localPlayer.color[1],
+                _G.localPlayer.color[2],
+                _G.localPlayer.color[3]))
+        elseif _G.gameState == "hosting" and _G.serverClients and _G.safeSend then
+            for _, client in ipairs(_G.serverClients) do
+                _G.safeSend(client, string.format("%d,%d,%d,%.2f,%.2f,%.2f",
+                    _G.localPlayer.id,
+                    math.floor(_G.localPlayer.x),
+                    math.floor(_G.localPlayer.y),
+                    _G.localPlayer.color[1],
+                    _G.localPlayer.color[2],
+                    _G.localPlayer.color[3]))
+            end
+        end
     end
 end
 
@@ -149,11 +182,19 @@ function scoreLobby.show(roundNumber, wins, playersTable)
     scoreLobby.players = playersTable
     scoreLobby.animationTime = 0
     
+    -- Initialize player positions (CRITICAL!)
+    if _G.localPlayer and _G.localPlayer.id and scoreLobby.players[_G.localPlayer.id] then
+        -- Make sure the local player has a position in the score lobby
+        if not scoreLobby.players[_G.localPlayer.id].x then
+            scoreLobby.players[_G.localPlayer.id].x = _G.localPlayer.x or 100
+        end
+        if not scoreLobby.players[_G.localPlayer.id].y then
+            scoreLobby.players[_G.localPlayer.id].y = _G.localPlayer.y or 100
+        end
+    end
+    
     -- Initialize text animation
     scoreLobby.initTextAnimation()
-    
-    -- Initialize voting system
-    scoreLobby.initVoting()
     
     -- Store return state
     _G.returnState = _G.gameState or "playing"
@@ -180,11 +221,11 @@ function scoreLobby.update(dt)
     scoreLobby.timer = scoreLobby.timer - dt
     scoreLobby.animationTime = scoreLobby.animationTime + dt
     
+    -- Update player movement (like other games)
+    scoreLobby.updatePlayerMovement(dt)
+    
     -- Update text animation
     scoreLobby.updateTextAnimation(dt)
-    
-    -- Update voting system
-    scoreLobby.updateVoting(dt)
     
     -- Update background stars
     for _, star in ipairs(scoreLobby.backgroundStars) do
@@ -216,7 +257,7 @@ end
 
 -- Check if score lobby is blocking network updates
 function scoreLobby.isBlockingNetwork()
-    return true -- Score lobby blocks game state changes but allows voting
+    return false -- Allow player movement and network updates in score lobby
 end
 
 -- Update text animation (4 phases, letter-by-letter)
@@ -346,25 +387,12 @@ function scoreLobby.draw()
                 "center"
             )
             
-            -- Draw voting status for this player
-            if scoreLobby.voting.votes[id] then
-                love.graphics.setColor(0, 1, 0, 1) -- Green for voted
-                love.graphics.printf(
-                    "VOTED TO QUIT",
-                    (player.x or 100) - 40,
-                    (player.y or 100) + 40,
-                    120,
-                    "center"
-                )
-            end
+            -- Voting status removed
         end
     end
     
     -- Draw animated text in center (bold)
     scoreLobby.drawAnimatedText()
-    
-    -- Draw voting instructions
-    scoreLobby.drawVotingInstructions()
     
     -- Draw timer
     local timerPulse = math.sin(scoreLobby.animationTime * 5) * 0.3 + 0.7
@@ -418,152 +446,20 @@ function scoreLobby.drawAnimatedText()
     -- Phase indicator removed for cleaner display
 end
 
--- Draw voting instructions
-function scoreLobby.drawVotingInstructions()
-    local voting = scoreLobby.voting
-    local currentVotes = 0
-    for _ in pairs(voting.votes) do
-        currentVotes = currentVotes + 1
-    end
-    
-    -- Draw voting status
-    love.graphics.setFont(love.graphics.newFont(20))
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.printf(string.format("Votes to quit: %d/%d (Need %d for 2/3 majority)", 
-        currentVotes, voting.totalPlayers, voting.votesNeeded), 
-        0, 450, _G.BASE_WIDTH, "center")
-    
-    -- Draw instructions
-    love.graphics.setFont(love.graphics.newFont(16))
-    
-    -- Check if voting is disabled in last 5 seconds
-    if scoreLobby.timer <= 5 then
-        love.graphics.setColor(1, 0.5, 0.5, 1)
-        love.graphics.printf("Voting disabled - Final countdown!", 
-            0, 480, _G.BASE_WIDTH, "center")
-    elseif not voting.hasVoted then
-        love.graphics.setColor(0.8, 0.8, 1, 1)
-        love.graphics.printf("Hold SPACE for 1.5 seconds to vote to quit", 
-            0, 480, _G.BASE_WIDTH, "center")
-        
-        -- Draw progress bar for space holding
-        if voting.spaceHeld then
-            local progress = math.min(voting.holdTimer / voting.holdDuration, 1.0)
-            love.graphics.setColor(1, 1, 0, 1)
-            love.graphics.printf(string.format("Voting... %.1f%%", progress * 100), 
-                0, 500, _G.BASE_WIDTH, "center")
-        end
-    else
-        love.graphics.setColor(0, 1, 0, 1)
-        love.graphics.printf("✓ You voted to quit!", 
-            0, 480, _G.BASE_WIDTH, "center")
-    end
-    
-    -- Host instructions removed
-end
+-- Voting instructions removed
 
--- Handle key press (voting system)
+-- Handle key press (no voting, just return false)
 function scoreLobby.keypressed(key)
     if not scoreLobby.showing then return false end
-    
-    -- Disable voting in the last 5 seconds
-    if scoreLobby.timer <= 5 then
-        return false
-    end
-    
-    local voting = scoreLobby.voting
-    
-    -- ESC functionality removed
-    
-    -- Space key for voting
-    if key == "space" and not voting.hasVoted then
-        voting.spaceHeld = true
-        voting.holdTimer = 0
-        return true
-    end
-    
-    return false
+    return false -- No key handling needed
 end
 
--- Handle key release (voting system)
+-- Handle key release (no voting, just return false)
 function scoreLobby.keyreleased(key)
     if not scoreLobby.showing then return false end
-    
-    local voting = scoreLobby.voting
-    
-    if key == "space" and voting.spaceHeld then
-        voting.spaceHeld = false
-        voting.holdTimer = 0
-        return true
-    end
-    
-    return false
+    return false -- No key handling needed
 end
 
--- Update voting system
-function scoreLobby.updateVoting(dt)
-    if not scoreLobby.showing then return end
-    
-    local voting = scoreLobby.voting
-    
-    -- Disable voting in the last 5 seconds
-    if scoreLobby.timer <= 5 then
-        return
-    end
-    
-    -- Handle space holding for voting
-    if voting.spaceHeld and not voting.hasVoted then
-        voting.holdTimer = voting.holdTimer + dt
-        
-        -- Check if held long enough to vote
-        if voting.holdTimer >= voting.holdDuration then
-            voting.hasVoted = true
-            voting.spaceHeld = false
-            
-            -- Add vote (this would need to be networked in a real implementation)
-            if _G.localPlayer and _G.localPlayer.id then
-                voting.votes[_G.localPlayer.id] = true
-                
-                if _G.debugConsole and _G.debugConsole.addMessage then
-                    _G.debugConsole.addMessage(string.format("[Voting] Player %d voted to quit", _G.localPlayer.id))
-                end
-                
-                -- Check if we have enough votes
-                local currentVotes = 0
-                for _ in pairs(voting.votes) do
-                    currentVotes = currentVotes + 1
-                end
-                
-                if currentVotes >= voting.votesNeeded then
-                    scoreLobby.quitToLobby()
-                end
-            end
-        end
-    end
-end
-
--- Quit to lobby
-function scoreLobby.quitToLobby()
-    if _G.debugConsole and _G.debugConsole.addMessage then
-        _G.debugConsole.addMessage("[Voting] Quitting to lobby")
-    end
-    
-    scoreLobby.hide()
-    
-    -- Set game state back to playing/hosting
-    if _G.gameState then
-        _G.gameState = _G.returnState or "playing"
-    end
-    
-    -- If we're the host, notify all clients to quit to lobby
-    if _G.gameState == "hosting" and _G.serverClients then
-        for _, client in ipairs(_G.serverClients) do
-            _G.safeSend(client, "quit_to_lobby")
-        end
-        if _G.debugConsole and _G.debugConsole.addMessage then
-            _G.debugConsole.addMessage("[Voting] Notified all clients to quit to lobby")
-        end
-    end
-end
+-- Voting system removed
 
 return scoreLobby

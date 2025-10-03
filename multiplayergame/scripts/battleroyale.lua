@@ -51,7 +51,7 @@ battleRoyale.player_dropped = false
 battleRoyale.death_animation_done = false
 
 -- Random grow/shrink system (compensated for smaller scale)
-battleRoyale.min_radius = 200  -- Increased to compensate for smaller scale
+battleRoyale.min_radius = 120  -- Increased to compensate for smaller scale
 battleRoyale.max_radius = 450  -- Increased to compensate for smaller scale
 battleRoyale.shrink_chance = 1.0 -- Always shrink, never grow
 battleRoyale.size_change_timer = 0
@@ -112,7 +112,7 @@ battleRoyale.safe_zone_direction = {1, 0} -- Current movement direction
 battleRoyale.direction_angle = 0 -- Current direction angle in radians
 battleRoyale.target_x = 400 -- Target position to move towards
 battleRoyale.target_y = 300 -- Target position to move towards
-battleRoyale.target_reached_threshold = 20 -- Distance threshold to consider target reached
+battleRoyale.target_reached_threshold = 50 -- Distance threshold to consider target reached
 battleRoyale.beat_count = 0 -- Track beats for synchronization
 
 -- Music asteroid color system
@@ -301,8 +301,10 @@ function battleRoyale.handleBeat()
         battleRoyale.current_color_index = 1
     end
     
-    -- Select new target point on opposite side of screen
-    battleRoyale.selectNewTarget()
+    -- Select new target point every 4 beats (instead of every beat) to allow flying across screen
+    if battleRoyale.beat_count % 4 == 0 then
+        battleRoyale.selectNewTarget()
+    end
     
     -- Change music asteroid colors every beat
     battleRoyale.music_asteroid_color_index = battleRoyale.music_asteroid_color_index + 1

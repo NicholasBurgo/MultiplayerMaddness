@@ -1485,6 +1485,7 @@ function love.update(dt)
 
 
     -- Don't allow game transitions when score lobby is showing
+    -- Score lobby handles its own player movement
     if scoreLobby and scoreLobby.showing then
         return
     end
@@ -2061,7 +2062,8 @@ end
 
 function updatePhysics(dt)
     if gameState == "hosting" or gameState == "playing" then
-        -- Don't allow player movement when any menu is active (but allow movement in score lobby)
+        -- Don't allow player movement when any menu is active
+        -- Score lobby handles its own movement separately
         if gameModeSelection.active or levelSelector.active then
             return
         end
@@ -4228,6 +4230,15 @@ function handleServerMessage(id, data)
         return
     end
     
+    -- Handle score lobby vote message
+    if data:match("^score_lobby_vote,(%d+)") then
+        local playerId = tonumber(data:match("^score_lobby_vote,(%d+)"))
+        if scoreLobby and scoreLobby.handleVote then
+            scoreLobby.handleVote(playerId)
+        end
+        return
+    end
+    
     -- Handle game-specific scores for winner determination
     if data:match("^jump_score_sync,(%d+),(%d+)") then
         local playerId, score = data:match("^jump_score_sync,(%d+),(%d+)")
@@ -5513,6 +5524,24 @@ function handleClientMessage(data)
             -- Add party mode vote
             table.insert(levelSelector.partyModeVotes, playerId)
             debugConsole.addMessage("[Client] Player " .. playerId .. " voted for party mode")
+        end
+        return
+    end
+
+    -- Handle quit to lobby message
+    if data == "quit_to_lobby" then
+        if scoreLobby and scoreLobby.showing then
+            scoreLobby.hide()
+            debugConsole.addMessage("[Client] Quitting to lobby from score lobby")
+        end
+        return
+    end
+    
+    -- Handle score lobby vote message
+    if data:match("^score_lobby_vote,(%d+)") then
+        local playerId = tonumber(data:match("^score_lobby_vote,(%d+)"))
+        if scoreLobby and scoreLobby.handleVote then
+            scoreLobby.handleVote(playerId)
         end
         return
     end
