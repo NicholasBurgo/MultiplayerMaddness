@@ -1,6 +1,14 @@
 local dodgeGame = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
+
+-- Initialize base game functionality
+dodgeGame.baseGame = BaseGame:new("DodgeGame")
 
 -- Sound effects
 dodgeGame.sounds = {
@@ -10,12 +18,9 @@ dodgeGame.sounds = {
 -- Set laser sound volume
 dodgeGame.sounds.laser:setVolume(0.2)
 
--- Game state
-dodgeGame.game_over = false
-dodgeGame.current_round_score = 0
-dodgeGame.playerColor = {1, 1, 1}
-dodgeGame.screen_width = 800  -- Fixed base resolution
-dodgeGame.screen_height = 600  -- Fixed base resolution
+-- Game-specific properties
+dodgeGame.screen_width = constants.BASE_WIDTH  -- Fixed base resolution
+dodgeGame.screen_height = constants.BASE_HEIGHT  -- Fixed base resolution
 dodgeGame.camera_x = 0
 dodgeGame.camera_y = 0
 dodgeGame.death_count = 0
@@ -60,22 +65,24 @@ dodgeGame.player_dropped = false
 -- Laser structure: {x, y, target_player_id, tracking_time, active_time, is_active, is_tracking, target_x, stop_tracking_time}
 
 function dodgeGame.load()
-    debugConsole.addMessage("[DodgeGame] Loading dodge laser game")
-    debugConsole.addMessage("[DodgeGame] Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
+    logger.info("DodgeGame", "Loading dodge laser game")
+    logger.info("DodgeGame", "Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
     
     -- Reset game state
-    dodgeGame.game_over = false
-    dodgeGame.current_round_score = 0
     dodgeGame.death_count = 0
     dodgeGame.game_started = true
     dodgeGame.start_timer = 0
-    dodgeGame.timer = 30 -- Reset timer to 30 seconds
     dodgeGame.gameTime = 0
     dodgeGame.next_laser_time = 0
     dodgeGame.lasers = {}
     dodgeGame.player_dropped = false
     
-    debugConsole.addMessage("[DodgeGame] Dodge laser game loaded successfully")
+    -- Initialize base game
+    dodgeGame.baseGame:initialize()
+    dodgeGame.baseGame.gameTimer.duration = 30 -- Reset timer to 30 seconds
+    dodgeGame.baseGame.gameTimer.remaining = 30
+    
+    logger.info("DodgeGame", "Dodge laser game loaded successfully")
 
     dodgeGame.keysPressed = {}
     
@@ -199,8 +206,8 @@ function dodgeGame.setSeed(seed)
         end
     end
     
-    debugConsole.addMessage(string.format(
-        "[DodgeGame] Generated %d laser spawn points with seed %d",
+    logger.info("DodgeGame", string.format(
+        "Generated %d laser spawn points with seed %d",
         #dodgeGame.laserSpawnPoints,
         seed
     ))
@@ -210,32 +217,22 @@ function dodgeGame.update(dt)
     -- Update music effects
     musicHandler.update(dt)
     
+    -- Update base game logic
+    dodgeGame.baseGame:update(dt)
+    
     -- Game starts immediately - no start timer needed
 
     -- Don't return early if game_over - allow respawning
-    if dodgeGame.timer <= 0 then
-        dodgeGame.timer = 0
-        dodgeGame.game_over = true
+    if dodgeGame.baseGame:isGameOver() then
         return
     end
-
-    dodgeGame.timer = dodgeGame.timer - dt
     dodgeGame.gameTime = dodgeGame.gameTime + dt
     
     -- Handle player movement
     local moveSpeed = dodgeGame.player.speed
-    if love.keyboard.isDown('w') or love.keyboard.isDown('up') then
-        dodgeGame.player.y = dodgeGame.player.y - moveSpeed * dt
-    end
-    if love.keyboard.isDown('s') or love.keyboard.isDown('down') then
-        dodgeGame.player.y = dodgeGame.player.y + moveSpeed * dt
-    end
-    if love.keyboard.isDown('a') or love.keyboard.isDown('left') then
-        dodgeGame.player.x = dodgeGame.player.x - moveSpeed * dt
-    end
-    if love.keyboard.isDown('d') or love.keyboard.isDown('right') then
-        dodgeGame.player.x = dodgeGame.player.x + moveSpeed * dt
-    end
+    local dx, dy = input.getMovementInput()
+    dodgeGame.player.x = dodgeGame.player.x + dx * moveSpeed * dt
+    dodgeGame.player.y = dodgeGame.player.y + dy * moveSpeed * dt
 
     -- Keep player within screen bounds
     dodgeGame.player.x = math.max(0, math.min(dodgeGame.screen_width - dodgeGame.player.width, dodgeGame.player.x))
@@ -255,7 +252,7 @@ function dodgeGame.update(dt)
             dodgeGame.player.y = dodgeGame.random:random(50, dodgeGame.screen_height - 50)
             dodgeGame.player_dropped = false
             dodgeGame.respawn_timer = nil
-            debugConsole.addMessage("[DodgeGame] Player respawned!")
+            logger.info("DodgeGame", "Player respawned!")
         end
     end
 
@@ -269,7 +266,7 @@ function dodgeGame.update(dt)
     dodgeGame.updateStars(dt)
     
     -- Update scoring based on survival time
-    dodgeGame.current_round_score = dodgeGame.current_round_score + math.floor(dt * 10)
+    dodgeGame.baseGame:addScore(dt * 10)
     
         -- Store death count in players table for round win determination (least deaths wins)
         if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
@@ -645,7 +642,7 @@ function dodgeGame.reset()
 end
 
 function dodgeGame.setPlayerColor(color)
-    dodgeGame.playerColor = color
+    dodgeGame.baseGame:setPlayerColor(color)
 end
 
 return dodgeGame

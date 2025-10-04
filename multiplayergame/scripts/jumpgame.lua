@@ -1,6 +1,16 @@
 local jumpGame = {}
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local PartyMode = require "scripts.core.party_mode"
 
+-- Initialize base game functionality
+jumpGame.baseGame = BaseGame:new("JumpGame")
+
+-- Game-specific properties
 jumpGame.player = {}
 jumpGame.platforms = {}
 jumpGame.gravity = 0.25
@@ -13,11 +23,7 @@ jumpGame.game_speed = 1
 jumpGame.score = 0
 jumpGame.hit_platforms = {}
 jumpGame.background_image = nil
-jumpGame.timer = (musicHandler.beatInterval * 8)-- - (musicHandler.beatInterval / 2)
-jumpGame.game_over = false
 jumpGame.camera_smoothness = 0.1
-jumpGame.playerColor = {1, 1, 1}  
-jumpGame.current_round_score = 0
 
 jumpGame.particles = {}
 jumpGame.particleLifetime = 0.5
@@ -99,7 +105,7 @@ function jumpGame.load()
 
     jumpGame.background_image = love.graphics.newImage("images/JKGame.png")
 
-    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
+    local BASE_HEIGHT = constants.BASE_HEIGHT
     jumpGame.player.rect = { x = 100, y = BASE_HEIGHT - 130, width = 30, height = 30 }  -- Spawn on ground platform
     jumpGame.player.dy = 0
     jumpGame.player.is_jumping = false
@@ -125,6 +131,12 @@ function jumpGame.load()
         intensity = 0.5,
         duration = 0.2
     })
+    
+    -- Initialize base game timer
+    jumpGame.baseGame.gameTimer.duration = musicHandler.beatInterval * 8
+    jumpGame.baseGame.gameTimer.remaining = musicHandler.beatInterval * 8
+    
+    logger.info("JumpGame", "Game loaded")
 end
 
 function jumpGame.slowClock(dt)
@@ -132,7 +144,7 @@ function jumpGame.slowClock(dt)
 end
 
 function jumpGame.setPlayerColor(color)
-    jumpGame.playerColor = color
+    jumpGame.baseGame:setPlayerColor(color)
 end
 
 function jumpGame.writeScoreToFile()
@@ -149,31 +161,27 @@ function jumpGame.update(dt) -- added music reaction
     local color = musicHandler.getCurrentColor("platforms")
     musicHandler.update(dt)
 
-    if not jumpGame.game_over then
+    if not jumpGame.baseGame.game_over then
         dt = jumpGame.slowClock(dt)
         jumpGame.updateParticles(dt)
         
-
-        local keys = love.keyboard.isDown
-        if keys("a") then
-            jumpGame.player.rect.x = jumpGame.player.rect.x - jumpGame.move_speed * dt * 150
-        end
-        if keys("d") then
-            jumpGame.player.rect.x = jumpGame.player.rect.x + jumpGame.move_speed * dt * 150
+        local dx, dy = input.getMovementInput()
+        if dx ~= 0 then
+            jumpGame.player.rect.x = jumpGame.player.rect.x + dx * jumpGame.move_speed * dt * 150
         end
         
         -- Keep player within base resolution bounds
-        local BASE_WIDTH = _G.BASE_WIDTH or 800
+        local BASE_WIDTH = constants.BASE_WIDTH
         jumpGame.player.rect.x = math.max(0, math.min(BASE_WIDTH - jumpGame.player.rect.width, jumpGame.player.rect.x))
 
-        if keys("w") and not jumpGame.has_first_jump and not jumpGame.player.is_jumping then
+        if input.isJumpPressed() and not jumpGame.has_first_jump and not jumpGame.player.is_jumping then
             jumpGame.player.dy = -jumpGame.jump_strength
             jumpGame.has_first_jump = true
             jumpGame.player.is_jumping = true
             jumpGame.sounds.jump:clone():play()
         end
 
-        if keys("space") and jumpGame.has_first_jump and not jumpGame.has_second_jump then
+        if input.isActionPressed() and jumpGame.has_first_jump and not jumpGame.has_second_jump then
             jumpGame.player.dy = -jumpGame.jump_strength
             jumpGame.has_second_jump = true
             jumpGame.sounds.doublejump:clone():play()
@@ -186,7 +194,7 @@ function jumpGame.update(dt) -- added music reaction
         jumpGame.player.rect.y = jumpGame.player.rect.y + jumpGame.player.dy * dt * 90
 
         -- Ground collision (use BASE_HEIGHT to prevent resize issues)
-        local GROUND_Y = _G.BASE_HEIGHT or 600
+        local GROUND_Y = constants.BASE_HEIGHT
         if jumpGame.player.rect.y + jumpGame.player.rect.height >= GROUND_Y then
             jumpGame.player.rect.y = GROUND_Y - jumpGame.player.rect.height
             jumpGame.player.dy = 0
@@ -204,7 +212,7 @@ function jumpGame.update(dt) -- added music reaction
                 jumpGame.player.rect.y + jumpGame.player.rect.height <= platform.rect.y + platform.rect.height then
                 
                 -- Check if this was a "snap" (significant downward velocity suddenly stopped)
-                if previousDy < -2 and not love.keyboard.isDown('w') then -- Threshold for considering it a "snap"
+                if previousDy < -2 and not input.isJumpPressed() then -- Threshold for considering it a "snap"
                     jumpGame.sounds.perfectlanding:clone():play()
                     jumpGame.createParticles(
                         jumpGame.player.rect.x + jumpGame.player.rect.width / 2,
@@ -226,7 +234,7 @@ function jumpGame.update(dt) -- added music reaction
 
         -- Update score based on upward movement
         if jumpGame.player.dy < 0 then  -- Only count upward movement
-            jumpGame.current_round_score = jumpGame.current_round_score + math.floor(-jumpGame.player.dy * dt * 20)
+            jumpGame.baseGame:addScore(math.floor(-jumpGame.player.dy * dt * 20))
         end
 
         if on_platform then
@@ -236,27 +244,36 @@ function jumpGame.update(dt) -- added music reaction
         end
 
         -- Camera follow (use BASE_HEIGHT to prevent resize issues)
-        local target_camera_y = jumpGame.player.rect.y - (_G.BASE_HEIGHT or 600) / 2
+        local target_camera_y = jumpGame.player.rect.y - constants.BASE_HEIGHT / 2
         jumpGame.camera_y = jumpGame.camera_y + (target_camera_y - jumpGame.camera_y) * jumpGame.camera_smoothness
 
-        jumpGame.timer = jumpGame.timer - dt
-        if jumpGame.timer <= 0 then
-            jumpGame.timer = 0
-            jumpGame.game_over = true
+        -- Timer countdown
+        jumpGame.baseGame.gameTimer.remaining = jumpGame.baseGame.gameTimer.remaining - dt
+        if jumpGame.baseGame.gameTimer.remaining <= 0 then
+            jumpGame.baseGame.gameTimer.remaining = 0
+            jumpGame.baseGame.game_over = true
 
             -- Store score in players table for round win determination
             if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-                _G.players[_G.localPlayer.id].jumpScore = jumpGame.current_round_score
+                _G.players[_G.localPlayer.id].jumpScore = jumpGame.baseGame.current_round_score
             end
             
             -- Send score to server for winner determination
             if _G.safeSend and _G.server then
-                _G.safeSend(_G.server, string.format("jump_score_sync,%d,%d", _G.localPlayer.id, jumpGame.current_round_score))
-                debugConsole.addMessage("[Jump] Sent score to server: " .. jumpGame.current_round_score)
+                _G.safeSend(_G.server, string.format("jump_score_sync,%d,%d", _G.localPlayer.id, jumpGame.baseGame.current_round_score))
+                logger.debug("JumpGame", "Sent score to server: " .. jumpGame.baseGame.current_round_score)
             end
             
-            _G.gameState = returnState
-
+            -- Handle party mode transition or return to lobby
+            if PartyMode.isActive() then
+                -- Let party mode system handle the transition
+                PartyMode.handleGameEnd("jumpgame")
+                logger.info("JumpGame", "Party mode transition initiated")
+            else
+                -- Return to lobby for single game mode
+                _G.gameState = _G.returnState
+                logger.info("JumpGame", "Returning to lobby")
+            end
         end
     end
 end
@@ -265,8 +282,8 @@ function jumpGame.draw(playersTable, localPlayerId)
     -- Get current screen dimensions
     local screen_width = love.graphics.getWidth()
     local screen_height = love.graphics.getHeight()
-    local base_width = _G.BASE_WIDTH or 800
-    local base_height = _G.BASE_HEIGHT or 600
+    local base_width = constants.BASE_WIDTH
+    local base_height = constants.BASE_HEIGHT
     
     -- Calculate scaling to fit base resolution on screen
     local scale_x = screen_width / base_width
@@ -321,7 +338,7 @@ function jumpGame.draw(playersTable, localPlayerId)
         love.graphics.rotate(rotation or 0)
         love.graphics.scale(scaleX or 1, scaleY or 1)
         
-        love.graphics.setColor(pulseColor[1], pulseColor[2], pulseColor[3])
+        ui.setColor(pulseColor[1], pulseColor[2], pulseColor[3])
         love.graphics.rectangle(
             "fill",
             -platform.rect.width/2,
@@ -335,7 +352,7 @@ function jumpGame.draw(playersTable, localPlayerId)
     -- Draw particles
     for _, particleGroup in ipairs(jumpGame.particles) do
         for _, particle in ipairs(particleGroup) do
-            love.graphics.setColor(
+            ui.setColor(
                 particle.color[1],
                 particle.color[2],
                 particle.color[3],
@@ -345,77 +362,37 @@ function jumpGame.draw(playersTable, localPlayerId)
         end
     end
 
-    -- Draw main player with score
-    love.graphics.setColor(jumpGame.playerColor[1], jumpGame.playerColor[2], jumpGame.playerColor[3])
-    love.graphics.rectangle("fill", 
+    -- Draw main player
+    ui.drawPlayer(
         jumpGame.player.rect.x, 
         jumpGame.player.rect.y, 
         jumpGame.player.rect.width, 
-        jumpGame.player.rect.height) 
-
-    -- Draw main player with score
-    love.graphics.setColor(jumpGame.playerColor[1], jumpGame.playerColor[2], jumpGame.playerColor[3])
-    love.graphics.rectangle("fill", 
-        jumpGame.player.rect.x, 
-        jumpGame.player.rect.y, 
-        jumpGame.player.rect.width, 
-        jumpGame.player.rect.height
+        jumpGame.player.rect.height,
+        jumpGame.baseGame.playerColor,
+        playersTable and playersTable[localPlayerId] and playersTable[localPlayerId].facePoints
     )
 
-    -- Draw local player's face and score
-    if playersTable and playersTable[localPlayerId] then
-        -- Draw face
-        if playersTable[localPlayerId].facePoints then
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.draw(
-                playersTable[localPlayerId].facePoints,
-                jumpGame.player.rect.x,
-                jumpGame.player.rect.y,
-                0,
-                jumpGame.player.rect.width/100,
-                jumpGame.player.rect.height/100
-            )
-        end
-        
-        -- Score display removed
-    end
-
-    -- draw ghost players and scores
+    -- draw ghost players
     if playersTable then
         for id, player in pairs(playersTable) do
             if id ~= localPlayerId and player.jumpX and player.jumpY then
-                -- Draw ghost player body
-                love.graphics.setColor(player.color[1], player.color[2], player.color[3], 0.5)
-                love.graphics.rectangle("fill", 
+                ui.drawGhostPlayer(
                     player.jumpX, 
                     player.jumpY,
                     jumpGame.player.rect.width, 
-                    jumpGame.player.rect.height
+                    jumpGame.player.rect.height,
+                    player.color,
+                    player.facePoints
                 )
-                
-                -- Draw ghost player face if available
-                if player.facePoints then
-                    love.graphics.setColor(1, 1, 1, 0.5)
-                    love.graphics.draw(
-                        player.facePoints,
-                        player.jumpX,
-                        player.jumpY,
-                        0,
-                        jumpGame.player.rect.width/100,
-                        jumpGame.player.rect.height/100
-                    )
-                end
-                
-                -- Score display removed
             end
         end
     end
 
     love.graphics.pop() -- this works somehow
 
-    -- UI elements
+    -- Draw UI elements
     love.graphics.setColor(1, 1, 1)
-    local round_score_text = "Round Score: " .. jumpGame.current_round_score
+    local round_score_text = "Round Score: " .. jumpGame.baseGame.current_round_score
     love.graphics.print(round_score_text, 10, 10)
 
     -- Show total score from players table if available
@@ -432,16 +409,16 @@ function jumpGame.reset(playersTable)
     jumpGame.createPlatforms()
     jumpGame.hit_platforms = {}
     jumpGame.score = 0
-    jumpGame.timer = (musicHandler.beatInterval * 8)-- - (musicHandler.beatInterval / 2)
-    jumpGame.game_over = false
-    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
+    jumpGame.baseGame:initialize()
+    jumpGame.baseGame.gameTimer.duration = musicHandler.beatInterval * 8
+    jumpGame.baseGame.gameTimer.remaining = musicHandler.beatInterval * 8
+    local BASE_HEIGHT = constants.BASE_HEIGHT
     jumpGame.player.rect.x = 100
     jumpGame.player.rect.y = BASE_HEIGHT - 130  -- Spawn on ground platform
     jumpGame.player.dy = 0
     jumpGame.camera_y = 0
     jumpGame.has_first_jump = false
     jumpGame.has_second_jump = false
-    jumpGame.current_round_score = 0
 
     -- clear ghost positions if we have a players table
     if playersTable then
@@ -453,8 +430,8 @@ function jumpGame.reset(playersTable)
 end
 
 function jumpGame.createPlatforms()
-    local BASE_WIDTH = _G.BASE_WIDTH or 800
-    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
+    local BASE_WIDTH = constants.BASE_WIDTH
+    local BASE_HEIGHT = constants.BASE_HEIGHT
     
     -- base platforms
     jumpGame.platforms = {

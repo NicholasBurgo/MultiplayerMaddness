@@ -1,22 +1,26 @@
 local praiseGame = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
 
--- Game state
+-- Initialize base game functionality
+praiseGame.baseGame = BaseGame:new("PraiseGame")
+
+-- Game-specific properties
 praiseGame.player = {}
 praiseGame.particles = {}
-praiseGame.timer = 25 -- 25 seconds
-praiseGame.game_over = false
 praiseGame.is_dead = false
 praiseGame.camera_y = 0
-praiseGame.playerColor = {1, 1, 1}
 praiseGame.player_size = 30
 praiseGame.arena_size = 750  -- Same arena size as laser game
 praiseGame.arena_offset_x = 0
 praiseGame.arena_offset_y = 0
-praiseGame.current_round_score = 0
 praiseGame.is_penalized = false
-praiseGame.penalty_timer = 0
+praiseGame.penalty_timer = timer.create(1.0)
 praiseGame.PENALTY_DURATION = 1.0
 
 -- seed stuff
@@ -132,11 +136,11 @@ end
 
 -- Load the game
 function praiseGame.load()
-    debugConsole.addMessage("[Praise] Loading praise/belittler game")
+    logger.info("PraiseGame", "Loading praise/belittler game")
     
     -- Initialize player position (center of arena)
-    local base_width = _G.BASE_WIDTH or 800
-    local base_height = _G.BASE_HEIGHT or 600
+    local base_width = constants.BASE_WIDTH
+    local base_height = constants.BASE_HEIGHT
     
     praiseGame.player.x = praiseGame.arena_offset_x + praiseGame.arena_size / 2
     praiseGame.player.y = praiseGame.arena_offset_y + praiseGame.arena_size / 2
@@ -144,13 +148,14 @@ function praiseGame.load()
     praiseGame.player.vy = 0
     
     -- Reset game state
-    praiseGame.game_over = false
     praiseGame.is_dead = false
-    praiseGame.timer = 25 -- 25 seconds
-    praiseGame.current_round_score = 0
     praiseGame.is_penalized = false
-    praiseGame.penalty_timer = 0
     praiseGame.particles = {}
+    
+    -- Initialize base game
+    praiseGame.baseGame:initialize()
+    praiseGame.baseGame.gameTimer.duration = 25 -- 25 seconds
+    praiseGame.baseGame.gameTimer.remaining = 25
     
     -- Reset message system
     praiseGame.current_message_index = 1
@@ -186,7 +191,7 @@ function praiseGame.load()
     -- Initialize random generator
     praiseGame.random:setSeed(praiseGame.seed)
     
-    debugConsole.addMessage("[Praise] Game loaded - simple movement game")
+    logger.info("PraiseGame", "Game loaded - simple movement game")
 end
 
 -- Set seed for synchronized gameplay
@@ -201,25 +206,26 @@ end
 
 -- Update the game
 function praiseGame.update(dt)
+    -- Update base game logic
+    praiseGame.baseGame:update(dt)
+    
     -- Update victory scene timer
     if praiseGame.victory_scene then
         praiseGame.scene_timer = praiseGame.scene_timer - dt
         if praiseGame.scene_timer <= 0 then
             praiseGame.victory_scene = false
             -- Let main loop handle state transition
-            debugConsole.addMessage("[Praise] Victory scene ended - letting main loop handle state transition")
+            logger.info("PraiseGame", "Victory scene ended - letting main loop handle state transition")
         end
         return
     end
     
-    if praiseGame.game_over then 
+    if praiseGame.baseGame:isGameOver() then 
         return 
     end
     
-    praiseGame.timer = praiseGame.timer - dt
-    if praiseGame.timer <= 0 then
-        praiseGame.timer = 0
-        praiseGame.game_over = true
+    -- Check for game over
+    if praiseGame.baseGame:isGameOver() then
         
         -- Start victory scene (no scoring)
         praiseGame.victory_scene = true
@@ -228,7 +234,7 @@ function praiseGame.update(dt)
         -- Determine if player is winner (for now, just random for demo)
         praiseGame.is_winner = praiseGame.random:random() > 0.5
         
-        debugConsole.addMessage("[Praise] Game over - starting victory scene")
+        logger.info("PraiseGame", "Game over - starting victory scene")
         return
     end
     
@@ -297,20 +303,7 @@ function praiseGame.update(dt)
     end
     
     -- Handle player movement
-    local moveX, moveY = 0, 0
-    
-    if love.keyboard.isDown('w') or love.keyboard.isDown('up') then
-        moveY = moveY - 1
-    end
-    if love.keyboard.isDown('s') or love.keyboard.isDown('down') then
-        moveY = moveY + 1
-    end
-    if love.keyboard.isDown('a') or love.keyboard.isDown('left') then
-        moveX = moveX - 1
-    end
-    if love.keyboard.isDown('d') or love.keyboard.isDown('right') then
-        moveX = moveX + 1
-    end
+    local moveX, moveY = input.getMovementInput()
     
     -- Apply movement with acceleration/deceleration
     if moveX ~= 0 or moveY ~= 0 then
@@ -351,8 +344,8 @@ end
 
 -- Draw the game
 function praiseGame.draw(playersTable, localPlayerId)
-    local base_width = _G.BASE_WIDTH or 800
-    local base_height = _G.BASE_HEIGHT or 600
+    local base_width = constants.BASE_WIDTH
+    local base_height = constants.BASE_HEIGHT
     
     -- Set background color
     love.graphics.setColor(0.1, 0.1, 0.1)
@@ -454,10 +447,8 @@ function praiseGame.draw(playersTable, localPlayerId)
     
     love.graphics.pop()
     
-    -- Draw UI elements
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf(string.format("Time: %.1f", praiseGame.timer), 
-        0, 10, base_width, "center")
+    -- Draw base UI elements
+    praiseGame.baseGame:drawUI(playersTable, localPlayerId)
     
     -- Draw victory/defeat scene
     if praiseGame.victory_scene then
@@ -492,13 +483,13 @@ end
 
 -- Reset the game
 function praiseGame.reset(playersTable)
-    debugConsole.addMessage("[Praise] Resetting praise/belittler game")
+    logger.info("PraiseGame", "Resetting praise/belittler game")
     praiseGame.load()
 end
 
 -- Set player color
 function praiseGame.setPlayerColor(color)
-    praiseGame.playerColor = color
+    praiseGame.baseGame:setPlayerColor(color)
 end
 
 -- Handle key presses

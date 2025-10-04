@@ -28,6 +28,7 @@ local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 local instructions = require "scripts.instructions"
 local savefile = require "scripts.savefile"
+local PartyMode = require "scripts.core.party_mode"
 
 -- ============================================================================
 -- GAME STATE VARIABLES
@@ -69,11 +70,8 @@ local localPlayer = {
 -- ============================================================================
 local menuBackground = nil
 local lobbyBackground = nil
-local partyMode = false
-_G.partyMode = partyMode -- Make it globally accessible
-local currentPartyGame = nil
+-- Party mode is now handled by core/party_mode.lua
 local isFirstPartyInstruction = true
-local partyModeTransitioned = false -- Prevent multiple transitions
 
 -- ============================================================================
 -- FONT SYSTEM (prevents cumulative scaling issues)
@@ -385,6 +383,7 @@ local miniGameLineup = {
     "dodgegame",
     "praisegame"
 }
+_G.miniGameLineup = miniGameLineup -- Make it globally accessible for party mode system
 local currentGameIndex = 1
 
 -- Function to reset the game lineup to the correct sequence
@@ -397,6 +396,7 @@ local function resetGameLineup()
         "dodgegame",
         "praisegame"
     }
+    _G.miniGameLineup = miniGameLineup -- Update global reference
     currentGameIndex = 1
 end
 
@@ -1483,6 +1483,9 @@ function love.load() -- music effect
     checkServerStatus()
     jumpGame.load()
     -- Score lobby removed
+    
+    -- Initialize party mode system
+    PartyMode.initialize()
 end
 
 function love.update(dt)
@@ -1495,6 +1498,12 @@ function love.update(dt)
     -- Sync global currentRound with local currentRound
     if _G.currentRound and _G.currentRound ~= currentRound then
         currentRound = _G.currentRound
+    end
+    
+    -- Sync global gameState with local gameState
+    if _G.gameState and _G.gameState ~= gameState then
+        gameState = _G.gameState
+        debugConsole.addMessage("[Main] Game state synchronized: " .. gameState)
     end
     
     -- Update game mode selection animation
@@ -1510,42 +1519,24 @@ function love.update(dt)
 
     -- Score lobby removed
     
-    -- Track actual game transitions
-    if gameState == "jumpgame" then
-        currentPartyGame = "jumpgame"
-    elseif gameState == "lasergame" then
-        currentPartyGame = "lasergame"
-    elseif gameState == "meteorshower" then
-        currentPartyGame = "meteorshower"
-    elseif gameState == "dodgegame" then
-        currentPartyGame = "dodgegame"
-    elseif gameState == "praisegame" then
-        currentPartyGame = "praisegame"
+    -- Track current game for party mode system
+    if PartyMode.isActive() then
+        PartyMode.setPlayers(players, localPlayer)
     end
 
-    -- Check for party mode transition flag (host only)
-    if _G.partyModeTransition and returnState == "hosting" then
-        _G.partyModeTransition = false
-        partyModeTransitioned = false -- Reset the flag for next game
+    -- Handle party mode transitions using the new system
+    if _G.partyModeTransition and PartyMode.isActive() then
         debugConsole.addMessage("[PartyMode] Host transitioning to next game")
+        debugConsole.addMessage("[PartyMode] PartyMode.isActive(): " .. tostring(PartyMode.isActive()))
+        debugConsole.addMessage("[PartyMode] _G.partyModeTransition was: " .. tostring(_G.partyModeTransition))
         
         -- Reset battle royale state
         meteorShower.game_over = false
         meteorShower.death_animation_done = false
         
-        -- No elimination system in battle royale - players respawn instead
-        
-        -- Get next game from lineup
-        currentGameIndex = currentGameIndex + 1
-        if currentGameIndex > #miniGameLineup then
-            currentGameIndex = 1 -- Loop back to start
-        end
-        
-        local nextGame = miniGameLineup[currentGameIndex]
-        currentPartyGame = nextGame
-        debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
-        debugConsole.addMessage("[Party Mode] Current index: " .. currentGameIndex .. " of " .. #miniGameLineup)
-        debugConsole.addMessage("[Party Mode] Full lineup: " .. table.concat(miniGameLineup, ", "))
+        -- Get next game from party mode system
+        local nextGame = PartyMode.getCurrentGame()
+        debugConsole.addMessage("[PartyMode] Next game: " .. nextGame)
         
         -- Start the next game directly (no instructions in party mode transitions)
         if nextGame == "jumpgame" then
@@ -1554,9 +1545,11 @@ function love.update(dt)
             jumpGame.reset(players)
             jumpGame.setPlayerColor(localPlayer.color)
             
-            -- Host notifies clients
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "start_jump_game")
+            -- Notify clients if hosting
+            if returnState == "hosting" then
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "start_jump_game")
+                end
             end
         elseif nextGame == "lasergame" then
             -- Score lobby removed
@@ -1566,9 +1559,11 @@ function love.update(dt)
             laserGame.setSeed(seed)
             laserGame.setPlayerColor(localPlayer.color)
             
-            -- Host notifies clients
-            for _, client in ipairs(serverClients) do
-                safeSend(client, "start_laser_game," .. seed)
+            -- Notify clients if hosting
+            if returnState == "hosting" then
+                for _, client in ipairs(serverClients) do
+                    safeSend(client, "start_laser_game," .. seed)
+                end
             end
         elseif nextGame == "meteorshower" then
             -- Score lobby removed
@@ -1627,23 +1622,14 @@ function love.update(dt)
         for _, client in ipairs(serverClients) do
             safeSend(client, "party_transition_to," .. nextGame)
         end
+        
+        -- Clear the transition flag using the party mode system
+        PartyMode.clearTransition()
     end
 
     -- Removed duplicate party mode transition logic - now handled above
 
-    if partyMode then
-        if gameState == "jumpgame" then
-            currentPartyGame = "jumpgame"
-        elseif gameState == "lasergame" then
-            currentPartyGame = "lasergame"
-        elseif gameState == "meteorshower" then
-            currentPartyGame = "meteorshower"
-        elseif gameState == "dodgegame" then
-            currentPartyGame = "dodgegame"
-        elseif gameState == "praisegame" then
-            currentPartyGame = "praisegame"
-        end
-    end
+    -- Party mode tracking is now handled by core/party_mode.lua
 
     if gameState == "menu" or gameState == "play_menu" or gameState == "settings_menu" or gameState == "customize_menu" then
         titleGifAnim:update(dt)
@@ -1661,7 +1647,7 @@ function love.update(dt)
         musicHandler.applyCustomizationEffect()
     else
         -- Only stop music if we're not in party mode
-        if not partyMode then
+        if not PartyMode.isActive() then
             musicHandler.stopMusic()
         end
         musicHandler.clearEffects()
@@ -1741,27 +1727,21 @@ function love.update(dt)
                 debugConsole.addMessage("[Round] Starting round " .. currentRound)
             end
             
-            -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
-                partyModeTransitioned = true
-                -- In jump game, transition when the timer runs out (game ends naturally)
-                debugConsole.addMessage("Jump game finished, transitioning to next game")
-                _G.partyModeTransition = true
-                debugConsole.addMessage("[PartyMode] Set party mode transition flag")
-                
-                -- Host will handle the transition in the main loop
+            -- Handle party mode transition using new system
+            if PartyMode.isActive() then
+                local transitionResult = PartyMode.handleGameEnd("jumpgame")
+                if transitionResult == "transition" then
+                    debugConsole.addMessage("[PartyMode] Jump game finished, transitioning to next game")
+                elseif transitionResult == "score_lobby" then
+                    debugConsole.addMessage("[PartyMode] Showing score lobby after jump game")
+                    -- Handle score lobby logic here
+                end
+            else
+                debugConsole.addMessage("[PartyMode] Party mode not active, returning to lobby")
             end
             
-            -- Only return to lobby if not in party mode transition
-            if not _G.partyModeTransition then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-                jumpGame.reset()
-            else
-                debugConsole.addMessage("Party mode transition active, staying in jump game state")
-                -- Don't reset jumpGame here - let the transition logic handle it
-            end
-            -- Don't reset partyModeTransitioned here - let the transition logic handle it
+            -- Party mode transitions are now handled by the main loop transition handler
+            -- Don't change gameState here - let the transition logic handle it
         end
     elseif gameState == "lasergame" then
         if returnState == "hosting" then
@@ -1874,7 +1854,7 @@ function love.update(dt)
             end
             
             -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
+            if PartyMode.isActive() and not partyModeTransitioned then
                 partyModeTransitioned = true
                 -- In laser game, transition when the game ends naturally
                 debugConsole.addMessage("Laser game finished, transitioning to next game")
@@ -1884,13 +1864,8 @@ function love.update(dt)
                 -- Host will handle the transition in the main loop
             end
             
-            -- Only return to lobby if not in party mode transition
-            if not _G.partyModeTransition then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-            else
-                debugConsole.addMessage("Party mode transition active, staying in laser game state")
-            end
+            -- Party mode transitions are now handled by the main loop transition handler
+            -- Don't change gameState here - let the transition logic handle it
         end
     elseif gameState == "meteorshower" then
         -- Debug test - show message every 3 seconds
@@ -1956,7 +1931,7 @@ function love.update(dt)
             end
             
             -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
+            if PartyMode.isActive() and not partyModeTransitioned then
                 partyModeTransitioned = true
                 -- In battle royale, transition when the timer runs out
                 debugConsole.addMessage("Battle royale finished, transitioning to next game")
@@ -1977,16 +1952,8 @@ function love.update(dt)
                 debugConsole.addMessage("[Round] Starting round " .. currentRound)
             end
             
-            -- Only return to lobby if not in party mode
-            if not partyMode then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-                meteorShower.reset()
-            else
-                debugConsole.addMessage("Party mode active, staying in battle royale state for next game")
-                -- Don't reset meteorShower here - let the transition logic handle it
-            end
-            -- Don't reset partyModeTransitioned here - let the transition logic handle it
+            -- Party mode transitions are now handled by the main loop transition handler
+            -- Don't change gameState here - let the transition logic handle it
         end
     elseif gameState == "dodgegame" then
         if returnState == "hosting" then
@@ -2057,7 +2024,7 @@ function love.update(dt)
             end
             
             -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
+            if PartyMode.isActive() and not partyModeTransitioned then
                 partyModeTransitioned = true
                 debugConsole.addMessage("Dodge game finished, transitioning to next game")
                 
@@ -2068,7 +2035,6 @@ function love.update(dt)
                 end
                 
                 local nextGame = miniGameLineup[currentGameIndex]
-                currentPartyGame = nextGame
                 debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
                 
                 -- Start the next game directly
@@ -2146,16 +2112,8 @@ function love.update(dt)
                 debugConsole.addMessage("[Round] Starting round " .. currentRound)
             end
             
-            -- Only return to lobby if not in party mode
-            if not partyMode then
-                gameState = returnState
-                debugConsole.addMessage("Returned to state: " .. gameState)
-                dodgeGame.reset()
-            else
-                debugConsole.addMessage("Party mode active, staying in dodge game state for next game")
-                -- Don't reset dodgeGame here - let the transition logic handle it
-            end
-            -- Don't reset partyModeTransitioned here - let the transition logic handle it
+            -- Party mode transitions are now handled by the main loop transition handler
+            -- Don't change gameState here - let the transition logic handle it
         end
     elseif gameState == "praisegame" then
         praiseGame.update(dt)
@@ -2184,7 +2142,7 @@ function love.update(dt)
             -- Simple movement game - no scoring needed
             
             -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
+            if PartyMode.isActive() and not partyModeTransitioned then
                 partyModeTransitioned = true
                 debugConsole.addMessage("Praise game finished, transitioning to next game")
                 _G.partyModeTransition = true
@@ -2194,7 +2152,7 @@ function love.update(dt)
             end
             
             -- Only return to lobby if not in party mode
-            if not partyMode then
+            if not PartyMode.isActive() then
                 -- Simple movement game - no scoring, just return to lobby
                 if returnState == "hosting" then
                     gameState = "hosting"
@@ -2559,7 +2517,7 @@ function updateClient()
             debugConsole.addMessage("Praise game over, returning to state: " .. returnState)
             
             -- Check if we should transition in party mode (only once)
-            if partyMode and not partyModeTransitioned then
+            if PartyMode.isActive() and not partyModeTransitioned then
                 partyModeTransitioned = true
                 debugConsole.addMessage("Praise game finished, transitioning to next game")
                 
@@ -2570,7 +2528,6 @@ function updateClient()
                 end
                 
                 local nextGame = miniGameLineup[currentGameIndex]
-                currentPartyGame = nextGame
                 debugConsole.addMessage("[Party Mode] Next game: " .. nextGame)
                 
                 -- Start the next game directly
@@ -2642,7 +2599,7 @@ function updateClient()
             end
             
             -- Only return to lobby if not in party mode transition
-            if not partyMode then
+            if not PartyMode.isActive() then
                 -- Simple movement game - no scoring, just return to lobby
                 if returnState == "hosting" then
                     gameState = "hosting"
@@ -3248,9 +3205,9 @@ function love.keypressed(key)
                             -- Launch party mode
                             debugConsole.addMessage("[LevelSelector] Randomly selected party mode")
                             
-                            -- Start party mode
-                partyMode = true
-                _G.partyMode = partyMode
+                            -- Start party mode using new system
+                            PartyMode.start(PartyMode.TYPES.SEQUENTIAL)
+                            PartyMode.setPlayers(players, localPlayer)
                             debugConsole.addMessage("[Party Mode] Enabled via voting")
                 
                 -- Set the game lineup to correct sequence
@@ -3260,8 +3217,6 @@ function love.keypressed(key)
                             -- Start the first game in party mode (always jump game)
                             currentGameIndex = 1
                             local firstGame = "jumpgame" -- Always start with jump game
-                            currentPartyGame = firstGame
-                            partyModeTransitioned = false
                             
                             debugConsole.addMessage("[Party Mode] Starting first game: " .. firstGame)
                             
@@ -3283,7 +3238,7 @@ function love.keypressed(key)
                                 
                                 instructions.show("jumpgame", function()
                                     -- Start party music only after the first instruction if in party mode
-                                    if partyMode and isFirstPartyInstruction then
+                                    if PartyMode.isActive() and isFirstPartyInstruction then
                                         musicHandler.loadPartyMusic()
                                         isFirstPartyInstruction = false
                                         debugConsole.addMessage("[Party Mode] Starting music after first instruction")
@@ -3380,9 +3335,9 @@ function love.keypressed(key)
                         -- No votes, start party mode by default
                         debugConsole.addMessage("[GameMode] No votes found, starting party mode by default")
                         
-                        -- Start party mode
-                        partyMode = true
-                        _G.partyMode = partyMode
+                        -- Start party mode using new system
+                        PartyMode.start(PartyMode.TYPES.SEQUENTIAL)
+                        PartyMode.setPlayers(players, localPlayer)
                         debugConsole.addMessage("[Party Mode] Enabled via default (no votes)")
                         
                         -- Set the game lineup to correct sequence
@@ -3392,8 +3347,6 @@ function love.keypressed(key)
                         -- Start the first game in party mode (always jump game)
                         currentGameIndex = 1
                         local firstGame = "jumpgame" -- Always start with jump game
-                        currentPartyGame = firstGame
-                        partyModeTransitioned = false
                         
                         debugConsole.addMessage("[Party Mode] Starting first game: " .. firstGame)
                         
@@ -3415,7 +3368,7 @@ function love.keypressed(key)
                             
                             instructions.show("jumpgame", function()
                                 -- Start party music only after the first instruction if in party mode
-                                if partyMode and isFirstPartyInstruction then
+                                if PartyMode.isActive() and isFirstPartyInstruction then
                                     musicHandler.loadPartyMusic()
                                     isFirstPartyInstruction = false
                                     debugConsole.addMessage("[Party Mode] Starting music after first instruction")
@@ -3660,9 +3613,9 @@ function love.keypressed(key)
                         -- No votes, start party mode by default
                         debugConsole.addMessage("[GameMode] No votes found, starting party mode by default")
                         
-                        -- Start party mode
-                        partyMode = true
-                        _G.partyMode = partyMode
+                        -- Start party mode using new system
+                        PartyMode.start(PartyMode.TYPES.SEQUENTIAL)
+                        PartyMode.setPlayers(players, localPlayer)
                         debugConsole.addMessage("[Party Mode] Enabled via default (no votes)")
                         
                         -- Set the game lineup to correct sequence
@@ -3672,8 +3625,6 @@ function love.keypressed(key)
                         -- Start the first game in party mode (always jump game)
                         currentGameIndex = 1
                         local firstGame = "jumpgame" -- Always start with jump game
-                    currentPartyGame = firstGame
-                        partyModeTransitioned = false
                     
                     debugConsole.addMessage("[Party Mode] Starting first game: " .. firstGame)
                     
@@ -3695,9 +3646,9 @@ function love.keypressed(key)
                         
                         instructions.show("jumpgame", function()
                             -- Start party music only after the first instruction if in party mode
-                            if partyMode and isFirstPartyInstruction then
+                            if PartyMode.isActive() and isFirstPartyInstruction then
                                 musicHandler.loadPartyMusic()
-                                    isFirstPartyInstruction = false
+                                isFirstPartyInstruction = false
                                 debugConsole.addMessage("[Party Mode] Starting music after first instruction")
                             end
 
@@ -4261,7 +4212,7 @@ function love.keypressed(key)
         end
         
         -- If in party mode, start the first game from the shuffled lineup
-        if partyMode then
+        if PartyMode.isActive() then
             currentGameIndex = 1  -- Reset game index to start from beginning
             local firstGame = miniGameLineup[1]
             debugConsole.addMessage("[Party Mode] Starting first game via '1' key: " .. firstGame)
@@ -4275,7 +4226,7 @@ function love.keypressed(key)
                 
                 instructions.show("jumpgame", function()
                     -- Start party music only after the first instruction if in party mode
-                    if partyMode and isFirstPartyInstruction then
+                    if PartyMode.isActive() and isFirstPartyInstruction then
                         musicHandler.loadPartyMusic()
                         isFirstPartyInstruction = false  -- Clear the flag
                         debugConsole.addMessage("[Party Mode] Starting music after first instruction")
@@ -4291,7 +4242,7 @@ function love.keypressed(key)
                     -- Only send game start after instructions
                     for _, client in ipairs(serverClients) do
                         safeSend(client, "start_jump_game")
-                        if partyMode and isFirstPartyInstruction then
+                        if PartyMode.isActive() and isFirstPartyInstruction then
                             safeSend(client, "start_party_music")
                         end
                     end
@@ -4839,18 +4790,17 @@ function handleServerMessage(id, data)
     end
 
     if data == "request_party_mode" then
-        partyMode = true
-        _G.partyMode = partyMode -- Update global reference
+        -- Start party mode using new system
+        PartyMode.start(PartyMode.TYPES.SEQUENTIAL)
         
         -- Shuffle the game lineup for random order
         miniGameLineup = shuffleGameLineup()
+        _G.miniGameLineup = miniGameLineup -- Update global reference
         debugConsole.addMessage("[Party Mode] Game lineup shuffled: " .. table.concat(miniGameLineup, ", "))
         
         -- Start the first game in party mode (always jump game)
         currentGameIndex = 1
         local firstGame = "jumpgame" -- Always start with jump game
-        currentPartyGame = firstGame
-        partyModeTransitioned = false
         
         debugConsole.addMessage("[Party Mode] Starting first game: " .. firstGame)
         
@@ -5699,6 +5649,7 @@ function handleClientMessage(data)
         else
             -- Fallback to local shuffle if no lineup received
         miniGameLineup = shuffleGameLineup()
+        _G.miniGameLineup = miniGameLineup -- Update global reference
             debugConsole.addMessage("[Client] Fallback: Game lineup shuffled locally: " .. table.concat(miniGameLineup, ", "))
         end
         -- Start party music for client
@@ -5712,9 +5663,7 @@ function handleClientMessage(data)
     end
     
     if data == "end_party_mode" then
-        partyMode = false
-        _G.partyMode = partyMode -- Update global reference
-        currentPartyGame = nil
+        PartyMode.stop()  -- Stop party mode using new system
         gameState = "playing"
         return
     end

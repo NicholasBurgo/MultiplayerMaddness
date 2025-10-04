@@ -1,6 +1,14 @@
 local meteorShower = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
+
+-- Initialize base game functionality
+meteorShower.baseGame = BaseGame:new("MeteorShower")
 
 -- Sound effects
 meteorShower.sounds = {
@@ -10,12 +18,9 @@ meteorShower.sounds = {
 -- Set death sound volume
 meteorShower.sounds.death:setVolume(0.3)
 
--- Game state
-meteorShower.game_over = false
-meteorShower.current_round_score = 0
-meteorShower.playerColor = {1, 1, 1}
-meteorShower.screen_width = 800  -- Fixed base resolution
-meteorShower.screen_height = 600  -- Fixed base resolution
+-- Game-specific properties
+meteorShower.screen_width = constants.BASE_WIDTH  -- Fixed base resolution
+meteorShower.screen_height = constants.BASE_HEIGHT  -- Fixed base resolution
 meteorShower.camera_x = 0
 meteorShower.camera_y = 0
 meteorShower.death_count = 0
@@ -138,11 +143,9 @@ meteorShower.radius_interpolation_speed = 120.0 -- Faster interpolation for radi
 meteorShower.last_radius = 250 -- Track last radius for smooth transitions
 
 function meteorShower.load()
-    debugConsole.addMessage("[MeteorShower] Loading meteor shower game")
-    debugConsole.addMessage("[MeteorShower] Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
+    logger.info("MeteorShower", "Loading meteor shower game")
+    logger.info("MeteorShower", "Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
     -- Reset game state
-    meteorShower.game_over = false
-    meteorShower.current_round_score = 0
     meteorShower.death_count = 0
     meteorShower.death_timer = 0
     meteorShower.death_shake = 0
@@ -159,11 +162,15 @@ function meteorShower.load()
     meteorShower.player.jump_count = 0
     meteorShower.player.has_double_jumped = false
     meteorShower.player.on_ground = false
-    -- Use safe timer calculation with fallback for party mode
-    local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
-    meteorShower.timer = beatInterval * 12.5 -- 25 seconds (reduced by 15 seconds)
     meteorShower.gameTime = 0
-    debugConsole.addMessage("[MeteorShower] Meteor shower loaded successfully")
+    
+    -- Initialize base game
+    meteorShower.baseGame:initialize()
+    local beatInterval = musicHandler.beatInterval or 2.0 -- Fallback to 2 seconds if not set
+    meteorShower.baseGame.gameTimer.duration = beatInterval * 12.5 -- 25 seconds (reduced by 15 seconds)
+    meteorShower.baseGame.gameTimer.remaining = beatInterval * 12.5
+    
+    logger.info("MeteorShower", "Meteor shower loaded successfully")
 
     meteorShower.keysPressed = {}
     
@@ -228,7 +235,7 @@ function meteorShower.load()
     meteorShower.last_radius = 250
     
     -- In party mode, ensure player starts in center of safe zone
-    debugConsole.addMessage("[BattleRoyale] Checking party mode: " .. tostring(_G and _G.partyMode or "nil") .. " (type: " .. type(_G and _G.partyMode) .. ")")
+    logger.info("MeteorShower", "[BattleRoyale] Checking party mode: " .. tostring(_G and _G.partyMode or "nil") .. " (type: " .. type(_G and _G.partyMode) .. ")")
     if _G and _G.partyMode == true then
         meteorShower.player.x = meteorShower.screen_width / 2
         meteorShower.player.y = meteorShower.screen_height / 2
@@ -237,9 +244,9 @@ function meteorShower.load()
         meteorShower.safe_zone_radius = 250 -- Start at max radius
         
         -- Debug music handler state
-        debugConsole.addMessage("[PartyMode] Player positioned in center of safe zone")
+        logger.info("MeteorShower", "[PartyMode] Player positioned in center of safe zone")
     else
-        debugConsole.addMessage("[BattleRoyale] Party mode not detected, using normal initialization")
+        logger.info("MeteorShower", "[BattleRoyale] Party mode not detected, using normal initialization")
     end
     
     -- No spacebar functionality needed without power-ups
@@ -262,7 +269,7 @@ function meteorShower.load()
     -- Override music handler onBeat function for Meteor Shower
     musicHandler.onBeat = meteorShower.handleBeat
 
-    debugConsole.addMessage("[MeteorShower] Game loaded")
+    logger.info("MeteorShower", "Game loaded")
 end
 
 -- Function to select a new target point at random spots around the screen
@@ -285,7 +292,7 @@ function meteorShower.selectNewTarget()
         meteorShower.direction_angle = math.atan2(dy, dx)
     end
     
-    debugConsole.addMessage(string.format("[SafeZone] New target: (%.1f, %.1f), Direction: %.1f°", 
+    logger.info("MeteorShower", string.format("[SafeZone] New target: (%.1f, %.1f), Direction: %.1f°", 
         target_x, target_y, math.deg(meteorShower.direction_angle)))
 end
 
@@ -318,7 +325,7 @@ function meteorShower.handleBeat()
     local max_multiplier = meteorShower.player.speed / base_speed
     local actual_multiplier = math.min(raw_multiplier, max_multiplier)
     
-    debugConsole.addMessage(string.format("[MeteorShower] Beat %d - Border Color: %d, Target: (%.1f, %.1f), Speed: %.1fx (capped at %.1fx)", 
+    logger.info("MeteorShower", string.format("[MeteorShower] Beat %d - Border Color: %d, Target: (%.1f, %.1f), Speed: %.1fx (capped at %.1fx)", 
         meteorShower.beat_count, meteorShower.current_color_index, meteorShower.target_x, meteorShower.target_y, actual_multiplier, max_multiplier))
 end
 
@@ -378,8 +385,8 @@ function meteorShower.setSeed(seed)
         time = time + 2.0
     end
     
-    debugConsole.addMessage(string.format(
-        "[MeteorShower] Generated %d meteoroid, %d music asteroids, and %d safe zone targets with seed %d",
+    logger.info("MeteorShower", string.format(
+        "Generated %d meteoroid, %d music asteroids, and %d safe zone targets with seed %d",
         #meteorShower.meteoroidSpawnPoints,
         #meteorShower.musicAsteroidSpawnPoints,
         #meteorShower.safeZoneTargets,
@@ -393,6 +400,9 @@ function meteorShower.update(dt)
     -- Update music effects
     musicHandler.update(dt)
     
+    -- Update base game logic
+    meteorShower.baseGame:update(dt)
+    
     if not meteorShower.game_started then
         meteorShower.start_timer = math.max(0, meteorShower.start_timer - dt)
         meteorShower.game_started = meteorShower.start_timer == 0
@@ -403,7 +413,7 @@ function meteorShower.update(dt)
             meteorShower.safe_zone_radius = 250
             meteorShower.center_x = meteorShower.screen_width / 2
             meteorShower.center_y = meteorShower.screen_height / 2
-            debugConsole.addMessage("[PartyMode] Game started - reset safe zone to max size")
+            logger.info("MeteorShower", "Game started - reset safe zone to max size")
             
             -- No elimination system - players respawn instead of being eliminated
         end
@@ -411,14 +421,12 @@ function meteorShower.update(dt)
         return
     end
 
-    if meteorShower.game_over then return end
+    if meteorShower.baseGame:isGameOver() then return end
 
-    meteorShower.timer = meteorShower.timer - dt
     meteorShower.gameTime = meteorShower.gameTime + dt
     
-    if meteorShower.timer <= 0 then
-        meteorShower.timer = 0
-        meteorShower.game_over = true
+    -- Check for game over
+    if meteorShower.baseGame:isGameOver() then
         
         -- No elimination system - players just continue until timer runs out
         
@@ -433,7 +441,7 @@ function meteorShower.update(dt)
         local target = table.remove(meteorShower.safeZoneTargets, 1)
         meteorShower.safe_zone_target_x = target.x
         meteorShower.safe_zone_target_y = target.y
-        debugConsole.addMessage("[SafeZone] New target: " .. meteorShower.safe_zone_target_x .. "," .. meteorShower.safe_zone_target_y)
+        logger.info("MeteorShower", "[SafeZone] New target: " .. meteorShower.safe_zone_target_x .. "," .. meteorShower.safe_zone_target_y)
     end
     
     -- Party mode uses same safe zone logic as standalone (no music handler dependency)
@@ -507,7 +515,7 @@ function meteorShower.update(dt)
             -- Always shrink - slower rate for more gradual shrinking
             meteorShower.current_change_rate = -15 -- pixels per second (slower shrinking)
             meteorShower.change_duration = meteorShower.random:random(2.0, 4.0) -- 2-4 seconds (longer duration)
-            debugConsole.addMessage("[SafeZone] Starting to shrink for " .. meteorShower.change_duration .. " seconds")
+            logger.info("MeteorShower", "[SafeZone] Starting to shrink for " .. meteorShower.change_duration .. " seconds")
             
             -- Restore original seed
             meteorShower.random:setSeed(meteorShower.seed)
@@ -526,7 +534,7 @@ function meteorShower.update(dt)
             
             if meteorShower.change_duration <= 0 then
                 meteorShower.current_change_rate = 0
-                debugConsole.addMessage("[SafeZone] Size change completed. Current radius: " .. math.floor(meteorShower.safe_zone_radius))
+                logger.info("MeteorShower", "[SafeZone] Size change completed. Current radius: " .. math.floor(meteorShower.safe_zone_radius))
             end
         end
     end
@@ -534,18 +542,9 @@ function meteorShower.update(dt)
     -- Handle top-down movement (only if not eliminated)
     if not meteorShower.player_dropped then
         local moveSpeed = meteorShower.player.speed
-        if love.keyboard.isDown('w') or love.keyboard.isDown('up') then
-            meteorShower.player.y = meteorShower.player.y - moveSpeed * dt
-        end
-        if love.keyboard.isDown('s') or love.keyboard.isDown('down') then
-            meteorShower.player.y = meteorShower.player.y + moveSpeed * dt
-        end
-        if love.keyboard.isDown('a') or love.keyboard.isDown('left') then
-            meteorShower.player.x = meteorShower.player.x - moveSpeed * dt
-        end
-        if love.keyboard.isDown('d') or love.keyboard.isDown('right') then
-            meteorShower.player.x = meteorShower.player.x + moveSpeed * dt
-        end
+        local dx, dy = input.getMovementInput()
+        meteorShower.player.x = meteorShower.player.x + dx * moveSpeed * dt
+        meteorShower.player.y = meteorShower.player.y + dy * moveSpeed * dt
     end
 
     -- Keep player within screen bounds
@@ -569,7 +568,7 @@ function meteorShower.update(dt)
         
         -- Debug output for party mode
         if _G.partyMode == true then
-            debugConsole.addMessage(string.format("[PartyMode] Player at (%.1f,%.1f), center at (%.1f,%.1f), radius=%.1f, distance=%.1f", 
+            logger.info("MeteorShower", string.format("[PartyMode] Player at (%.1f,%.1f), center at (%.1f,%.1f), radius=%.1f, distance=%.1f", 
                 meteorShower.player.x, meteorShower.player.y, center_x, center_y, radius, distance_from_center))
         end
         
@@ -580,7 +579,7 @@ function meteorShower.update(dt)
             meteorShower.death_shake = 15 -- Shake intensity
             meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
             meteorShower.sounds.death:clone():play() -- Play death sound
-            debugConsole.addMessage("[MeteorShower] Player died outside safe zone! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
+            logger.info("MeteorShower", "[MeteorShower] Player died outside safe zone! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
         end
     end
 
@@ -596,7 +595,7 @@ function meteorShower.update(dt)
             meteorShower.death_shake = 0
             meteorShower.player.is_invincible = true
             meteorShower.player.invincibility_timer = 2 -- 2 seconds of invincibility after respawn
-            debugConsole.addMessage("[MeteorShower] Player respawned in center of safe zone!")
+            logger.info("MeteorShower", "[MeteorShower] Player respawned in center of safe zone!")
         end
     end
 
@@ -638,18 +637,18 @@ function meteorShower.update(dt)
     end
 
     -- Update scoring based on survival time
-    meteorShower.current_round_score = meteorShower.current_round_score + math.floor(dt * 10)
+    meteorShower.baseGame:addScore(dt * 10)
     
         -- Store death count in players table for round win determination (least deaths wins)
         if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
             _G.players[_G.localPlayer.id].battleDeaths = meteorShower.death_count
-            _G.players[_G.localPlayer.id].battleScore = meteorShower.current_round_score
+            _G.players[_G.localPlayer.id].battleScore = meteorShower.baseGame.current_round_score
         end
         
         -- Send death count to server for winner determination
         if _G.safeSend and _G.server then
             _G.safeSend(_G.server, string.format("battle_deaths_sync,%d,%d", _G.localPlayer.id, meteorShower.death_count))
-            debugConsole.addMessage("[MeteorShower] Sent death count to server: " .. meteorShower.death_count)
+            logger.debug("MeteorShower", "Sent death count to server: " .. meteorShower.death_count)
         end
     
     -- Handle spacebar input using isDown (like jump game)
@@ -753,7 +752,7 @@ function meteorShower.draw(playersTable, localPlayerId)
             end
             
             -- Draw player
-            love.graphics.setColor(meteorShower.playerColor)
+            love.graphics.setColor(meteorShower.baseGame.playerColor)
             love.graphics.rectangle('fill',
                 meteorShower.player.x,
                 meteorShower.player.y,
@@ -832,11 +831,8 @@ function meteorShower.drawSafeZone(playersTable)
 end
 
 function meteorShower.drawUI(playersTable, localPlayerId)
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Score: ' .. math.floor(meteorShower.current_round_score), 10, 10)
-
-    love.graphics.printf(string.format("Time: %.1f", meteorShower.timer), 
-    0, 10, 800, "center")
+    -- Draw base UI elements
+    meteorShower.baseGame:drawUI(playersTable, localPlayerId)
     
     if playersTable and playersTable[localPlayerId] then
         love.graphics.print('Total Score: ' .. 
@@ -897,10 +893,7 @@ function meteorShower.drawUI(playersTable, localPlayerId)
         love.graphics.setColor(1, 1, 1)
     end
     
-    if not meteorShower.game_started then
-        love.graphics.printf('Get Ready: ' .. math.ceil(meteorShower.start_timer), 
-            0, meteorShower.screen_height / 2 - 50, meteorShower.screen_width, 'center')
-    end
+    -- Get ready timer removed - game starts immediately
     
     if meteorShower.game_over then
         love.graphics.printf('Game Over - You were caught outside the safe zone!', 
@@ -968,7 +961,7 @@ end
 
 function meteorShower.keypressed(key)
     print("[MeteorShower] Key pressed: " .. key)
-    debugConsole.addMessage("[MeteorShower] Key pressed: " .. key)
+    logger.info("MeteorShower", "[MeteorShower] Key pressed: " .. key)
     -- No special key handling needed without power-ups
 end
 
@@ -1161,7 +1154,7 @@ function meteorShower.spawnMusicAsteroidFromSpawnPoint(spawnInfo)
     meteorShower.generateAsteroidShape(asteroid) -- Generate the irregular shape
     
     table.insert(meteorShower.music_asteroids, asteroid)
-    debugConsole.addMessage("[MusicAsteroid] Spawned music-synced asteroid at time " .. spawnInfo.time)
+    logger.info("MeteorShower", "[MusicAsteroid] Spawned music-synced asteroid at time " .. spawnInfo.time)
 end
 
 function meteorShower.generateAsteroidShape(asteroid)
@@ -1253,7 +1246,7 @@ function meteorShower.checkAsteroidCollisions()
                 meteorShower.death_shake = 15 -- Shake intensity
                 meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
                 meteorShower.sounds.death:clone():play() -- Play death sound
-                debugConsole.addMessage("[MeteorShower] Player hit by regular asteroid! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
+                logger.info("MeteorShower", "[MeteorShower] Player hit by regular asteroid! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
             end
         end
     end
@@ -1274,7 +1267,7 @@ function meteorShower.checkAsteroidCollisions()
                 meteorShower.death_shake = 15 -- Shake intensity
                 meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
                 meteorShower.sounds.death:clone():play() -- Play death sound
-                debugConsole.addMessage("[MeteorShower] Player hit by music asteroid! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
+                logger.info("MeteorShower", "[MeteorShower] Player hit by music asteroid! Death count: " .. meteorShower.death_count .. ". Respawning in " .. meteorShower.respawn_delay .. " seconds...")
             end
         end
     end
@@ -1287,7 +1280,7 @@ function meteorShower.reset()
 end
 
 function meteorShower.setPlayerColor(color)
-    meteorShower.playerColor = color
+    meteorShower.baseGame:setPlayerColor(color)
 end
 
 function meteorShower.sendGameStateSync()

@@ -1,12 +1,18 @@
 local duelGame = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
 local anim8 = require "scripts.anim8"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
 
--- Game state
+-- Initialize base game functionality
+duelGame.baseGame = BaseGame:new("DuelGame")
+
+-- Game-specific properties
 duelGame.state = "start"  -- states: start, result
-duelGame.current_round_score = 0
-duelGame.game_over = false
 duelGame.winning_points = 300
 
 -- Animation states
@@ -73,14 +79,19 @@ function duelGame.reset()
     duelGame.frameCount = 0
     duelGame.hasShot = false
     duelGame.shotResult = nil
-    duelGame.game_over = false
-    duelGame.current_round_score = 0
     duelGame.currentPauseTimer = 0
+    
+    -- Initialize base game
+    duelGame.baseGame:initialize()
+    
     love.graphics.setFont(love.graphics.newFont(12))
 end
 
 function duelGame.update(dt)
-    if duelGame.game_over then return end
+    -- Update base game logic
+    duelGame.baseGame:update(dt)
+    
+    if duelGame.baseGame:isGameOver() then return end
 
     if duelGame.state == "start" then
         if duelGame.currentPauseTimer > 0 then
@@ -110,7 +121,7 @@ function duelGame.update(dt)
             -- During ending pause, stay on last frame
             duelGame.currentPauseTimer = duelGame.currentPauseTimer - dt
             if duelGame.currentPauseTimer <= 0 then
-                duelGame.game_over = true
+                duelGame.baseGame.game_over = true
             end
         else
             duelGame.currentAnim:update(dt)
@@ -160,7 +171,7 @@ function duelGame.draw()
     end
     
     if duelGame.winAnim.position >= 10 and duelGame.shotResult == "win" then
-        debugConsole.addMessage("[Duel Game] WIN")
+        logger.info("DuelGame", "WIN")
         love.graphics.setColor(1, 0, 0)
         love.graphics.setFont(font)
         if duelGame.shotResult == "win" then
@@ -169,7 +180,7 @@ function duelGame.draw()
                 love.graphics.getWidth(), "center")
         end
     elseif duelGame.loseAnim.position >= 10 and duelGame.shotResult == "lose" then
-        debugConsole.addMessage("[Duel Game] LOSE")
+        logger.info("DuelGame", "LOSE")
         love.graphics.setColor(1, 0, 0)
         love.graphics.setFont(font)
         if duelGame.shotResult == "lose" then

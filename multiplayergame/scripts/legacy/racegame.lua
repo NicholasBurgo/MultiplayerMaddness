@@ -1,13 +1,18 @@
 local raceGame = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
 
--- Game state
-raceGame.game_over = false
-raceGame.current_round_score = 0
-raceGame.playerColor = {1, 1, 1}
-raceGame.screen_width = 800
-raceGame.screen_height = 600
+-- Initialize base game functionality
+raceGame.baseGame = BaseGame:new("RaceGame")
+
+-- Game-specific properties
+raceGame.screen_width = constants.BASE_WIDTH
+raceGame.screen_height = constants.BASE_HEIGHT
 raceGame.camera_x = 0
 
 -- Game settings 
@@ -68,8 +73,6 @@ raceGame.keysPressed = {}
 
 function raceGame.load()
     -- Reset game state
-    raceGame.game_over = false
-    raceGame.current_round_score = 0
     raceGame.camera_x = 0
     raceGame.game_started = false
     raceGame.start_timer = 0
@@ -81,7 +84,11 @@ function raceGame.load()
     raceGame.player.jump_count = 0
     raceGame.player.has_double_jumped = false
     raceGame.player.on_ground = false
-    raceGame.timer = (musicHandler.beatInterval * 8)
+    
+    -- Initialize base game
+    raceGame.baseGame:initialize()
+    raceGame.baseGame.gameTimer.duration = musicHandler.beatInterval * 8
+    raceGame.baseGame.gameTimer.remaining = musicHandler.beatInterval * 8
 
     raceGame.keysPressed = {}
 
@@ -118,22 +125,23 @@ function raceGame.load()
     raceGame.createObstacles()
     raceGame.createPowerUps()
 
-    debugConsole.addMessage("[RaceGame] Game loaded")
+    logger.info("RaceGame", "Game loaded")
 end
 
 function raceGame.update(dt)
+    -- Update base game logic
+    raceGame.baseGame:update(dt)
+    
     if not raceGame.game_started then
         raceGame.start_timer = math.max(0, raceGame.start_timer - dt)
         raceGame.game_started = raceGame.start_timer == 0
         return
     end
 
-    if raceGame.game_over then return end
+    if raceGame.baseGame:isGameOver() then return end
 
-    raceGame.timer = raceGame.timer - dt
-    if raceGame.timer <= 0 then
-        raceGame.timer = 0
-        raceGame.game_over = true
+    -- Check for game over
+    if raceGame.baseGame:isGameOver() then
         
         -- Send final score
         if _G.gameState == "hosting" then
@@ -181,12 +189,8 @@ function raceGame.update(dt)
 
     -- Handle horizontal movement
     local moveSpeed = raceGame.player.speed
-    if love.keyboard.isDown('a') or love.keyboard.isDown('left') then
-        raceGame.player.x = raceGame.player.x - moveSpeed * dt
-    end
-    if love.keyboard.isDown('d') or love.keyboard.isDown('right') then
-        raceGame.player.x = raceGame.player.x + moveSpeed * dt
-    end
+    local dx, dy = input.getMovementInput()
+    raceGame.player.x = raceGame.player.x + dx * moveSpeed * dt
 
     -- Handle dropping through platforms
     if love.keyboard.isDown('s') and raceGame.player.on_ground and 
@@ -203,14 +207,14 @@ function raceGame.update(dt)
     raceGame.player.dy = (raceGame.player.dy + raceGame.gravity * dt) + 3
     
     -- Handle first jump with 'W'
-    if (love.keyboard.isDown('w') or love.keyboard.isDown('up')) and raceGame.player.on_ground then
+    if input.isJumpPressed() and raceGame.player.on_ground then
         raceGame.player.dy = raceGame.player.jump_strength
         raceGame.player.jump_count = 1
         raceGame.player.on_ground = false
     end
     
     -- Handle double jump with Space (only in midair after first jump)
-    if love.keyboard.isDown('space') and not raceGame.player.on_ground 
+    if input.isActionPressed() and not raceGame.player.on_ground 
         and not raceGame.player.has_double_jumped then
         raceGame.player.dy = raceGame.player.jump_strength
         raceGame.player.has_double_jumped = true
@@ -357,7 +361,7 @@ function raceGame.update(dt)
     end
 
     -- Update scoring
-    raceGame.current_round_score = math.floor(raceGame.camera_x / 20)
+    raceGame.baseGame:setScore(math.floor(raceGame.camera_x / 20))
 
     -- Update effects
     raceGame.updateStars(dt)
@@ -560,11 +564,8 @@ function raceGame.createPlatforms()
 end
 
 function raceGame.drawUI(playersTable, localPlayerId)
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Score: ' .. math.floor(raceGame.current_round_score), 10, 10)
-
-    love.graphics.printf(string.format("Time: %.1f", raceGame.timer), 
-    0, 10, love.graphics.getWidth(), "center")
+    -- Draw base UI elements
+    raceGame.baseGame:drawUI(playersTable, localPlayerId)
     
     if playersTable and playersTable[localPlayerId] then
         love.graphics.print('Total Score: ' .. 
@@ -878,7 +879,7 @@ function raceGame.reset()
 end
 
 function raceGame.setPlayerColor(color)
-    raceGame.playerColor = color
+    raceGame.baseGame:setPlayerColor(color)
 end
 
 return raceGame

@@ -1,24 +1,28 @@
 local laserGame = {}
-local debugConsole = require "scripts.debugconsole"
 local musicHandler = require "scripts.musichandler"
+local BaseGame = require "scripts.core.base_game"
+local constants = require "scripts.core.constants"
+local logger = require "scripts.core.logger"
+local input = require "scripts.core.input"
+local ui = require "scripts.core.ui"
+local timer = require "scripts.core.timer"
 
--- Game state
+-- Initialize base game functionality
+laserGame.baseGame = BaseGame:new("LaserGame")
+
+-- Game-specific properties
 laserGame.player = {}
 laserGame.lasers = {}
 laserGame.particles = {}
-laserGame.timer = (musicHandler.beatInterval * 8)-- - (musicHandler.beatInterval / 2)
-laserGame.game_over = false
 laserGame.is_dead = false
 laserGame.camera_y = 0
-laserGame.playerColor = {1, 1, 1}
 laserGame.player_size = 30
 laserGame.arena_size = 750  -- Increased from 600 to 750 for bigger arena
 laserGame.arena_offset_x = 0
 laserGame.arena_offset_y = 0
 laserGame.points_per_second = 15
-laserGame.current_round_score = 0
 laserGame.is_penalized = false
-laserGame.penalty_timer = 0
+laserGame.penalty_timer = timer.create(1.0)
 laserGame.PENALTY_DURATION = 1.0
 laserGame.hitCount = 0
 
@@ -120,11 +124,11 @@ function laserGame.load()
     -- Use base resolution for arena sizing
     laserGame.arena_offset_x = 0
     laserGame.arena_offset_y = 0
-    laserGame.arena_size = _G.BASE_WIDTH or 800  -- Use base width
+    laserGame.arena_size = constants.BASE_WIDTH  -- Use base width
 
     laserGame.player = {
-        x = (_G.BASE_WIDTH or 800) / 2,  -- Center of base screen
-        y = (_G.BASE_HEIGHT or 600) / 2,  -- Center of base screen
+        x = constants.BASE_WIDTH / 2,  -- Center of base screen
+        y = constants.BASE_HEIGHT / 2,  -- Center of base screen
         radius = laserGame.player_size / 2,
         speed = 300
     }
@@ -132,12 +136,14 @@ function laserGame.load()
     laserGame.lasers = {}
     laserGame.particles = {}
     laserGame.puddles = {}
-    laserGame.timer = (musicHandler.beatInterval * 8)-- - (musicHandler.beatInterval / 2)
-    laserGame.game_over = false
     laserGame.is_dead = false
     laserGame.next_laser_time = laserGame.min_laser_interval
-    laserGame.current_round_score = 0
     laserGame.gameTime = 0
+    
+    -- Initialize base game
+    laserGame.baseGame:initialize()
+    laserGame.baseGame.gameTimer.duration = musicHandler.beatInterval * 8
+    laserGame.baseGame.gameTimer.remaining = musicHandler.beatInterval * 8
     
     -- Make sure globals exist and are valid with proper score preservation
     if not _G.players then _G.players = {} end
@@ -158,7 +164,7 @@ function laserGame.load()
         _G.localPlayer.totalScore = existingScore
     end
     
-    debugConsole.addMessage(string.format("[Laser] Game loaded with player ID: %s, existing score: %d", 
+    logger.info("LaserGame", string.format("Game loaded with player ID: %s, existing score: %d", 
         _G.localPlayer.id or "none", existingScore))
     
     if _G.gameState == "hosting" then
@@ -175,7 +181,7 @@ function laserGame.setSeed(seed)
     laserGame.laserSpawnPoints = {}
     
     local time = 0
-    while time < laserGame.timer do
+    while time < laserGame.baseGame.gameTimer.duration do
         local spawnInfo = {
             time = time,
             isVertical = laserGame.random:random() < 0.5,
@@ -194,8 +200,8 @@ function laserGame.setSeed(seed)
         )
     end
     
-    debugConsole.addMessage(string.format(
-        "[LaserGame] Generated %d laser spawn points with seed %d",
+    logger.info("LaserGame", string.format(
+        "Generated %d laser spawn points with seed %d",
         #laserGame.laserSpawnPoints,
         seed
     ))
@@ -296,13 +302,11 @@ function laserGame.findIntersections()
                 -- If no duplicate, create new puddle
                 if not duplicatePuddle then
                     -- Debug visualization of intersection point
-                    if _G.debugConsole then
-                        _G.debugConsole.addMessage(string.format(
-                            "New puddle at %.1f, %.1f (V: %.1f, H: %.1f)", 
-                            intersectX, intersectY,
-                            verticalCenterX, horizontalCenterY
-                        ))
-                    end
+                    logger.debug("LaserGame", string.format(
+                        "New puddle at %.1f, %.1f (V: %.1f, H: %.1f)", 
+                        intersectX, intersectY,
+                        verticalCenterX, horizontalCenterY
+                    ))
                     
                     table.insert(laserGame.puddles, {
                         x = intersectX,
@@ -334,24 +338,25 @@ function laserGame.spawnEndpointParticles(laser)
 end
 
 function laserGame.update(dt)
-    if laserGame.game_over then 
+    -- Update base game logic
+    laserGame.baseGame:update(dt)
+    
+    if laserGame.baseGame:isGameOver() then 
         laserGame.puddles = {}
         return 
     end
     
     -- Update penalty state
     if laserGame.is_penalized then
-        laserGame.penalty_timer = laserGame.penalty_timer - dt
-        if laserGame.penalty_timer <= 0 then
+        timer.update(laserGame.penalty_timer, dt)
+        if timer.isExpired(laserGame.penalty_timer) then
             laserGame.is_penalized = false
-            debugConsole.addMessage("[Laser] Penalty ended, can score again")
+            logger.debug("LaserGame", "Penalty ended, can score again")
         end
     end
     
-    laserGame.timer = laserGame.timer - dt
-    if laserGame.timer <= 0 then
-        laserGame.timer = 0
-        laserGame.game_over = true
+    -- Check for game over
+    if laserGame.baseGame:isGameOver() then
         laserGame.puddles = {}
         
         -- Store hit count in players table for round win determination
@@ -362,7 +367,7 @@ function laserGame.update(dt)
         -- Send hit count to server for winner determination
         if _G.safeSend and _G.server then
             _G.safeSend(_G.server, string.format("laser_hits_sync,%d,%d", _G.localPlayer.id, laserGame.hitCount))
-            debugConsole.addMessage("[Laser] Sent hit count to server: " .. laserGame.hitCount)
+            logger.debug("LaserGame", "Sent hit count to server: " .. laserGame.hitCount)
         end
         
         if _G.returnState then
@@ -381,7 +386,7 @@ function laserGame.update(dt)
     
     -- Update score if not penalized
     if not laserGame.is_penalized then
-        laserGame.current_round_score = laserGame.current_round_score + (laserGame.points_per_second * dt)
+        laserGame.baseGame:addScore(laserGame.points_per_second * dt)
     end
     
     -- Update particles
@@ -393,16 +398,7 @@ function laserGame.update(dt)
     end
 
     -- Update player movement (always allowed)
-    local dx, dy = 0, 0
-    if love.keyboard.isDown('a') then dx = dx - 1 end
-    if love.keyboard.isDown('d') then dx = dx + 1 end
-    if love.keyboard.isDown('w') then dy = dy - 1 end
-    if love.keyboard.isDown('s') then dy = dy + 1 end
-    
-    if dx ~= 0 and dy ~= 0 then
-        dx = dx * 0.707
-        dy = dy * 0.707
-    end
+    local dx, dy = input.getMovementInput()
     
     laserGame.player.x = laserGame.player.x + dx * laserGame.player.speed * dt
     laserGame.player.y = laserGame.player.y + dy * laserGame.player.speed * dt
@@ -550,13 +546,13 @@ function laserGame.draw(playersTable, localPlayerId)
     -- If penalized, flash the player red
     if laserGame.is_penalized then
         -- Flash between red and normal color
-        if math.floor(laserGame.penalty_timer * 10) % 2 == 0 then
+        if math.floor(timer.getRemaining(laserGame.penalty_timer) * 10) % 2 == 0 then
             love.graphics.setColor(1, 0, 0, 0.8)  -- Red flash
         else
-            love.graphics.setColor(laserGame.playerColor)
+            love.graphics.setColor(laserGame.baseGame.playerColor)
         end
     else
-        love.graphics.setColor(laserGame.playerColor)
+        love.graphics.setColor(laserGame.baseGame.playerColor)
     end
     
     love.graphics.rectangle("fill",
@@ -583,20 +579,17 @@ function laserGame.draw(playersTable, localPlayerId)
     -- Pop graphics state
     love.graphics.pop()
     
-    -- Draw UI elements with integer scores
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf(string.format("Time: %.1f", laserGame.timer), 
-        0, 10, base_width, "center")
+    -- Draw base UI elements
+    laserGame.baseGame:drawUI(playersTable, localPlayerId)
     
     -- Draw times hit display
-    love.graphics.setColor(1, 0.5, 0)
-    love.graphics.printf(string.format("Times Hit: %d", laserGame.hitCount), 
-        0, 40, base_width, "center")
+    ui.drawCenteredText(string.format("Times Hit: %d", laserGame.hitCount), 
+        0, 40, base_width, {1, 0.5, 0})
     
     -- If penalized, show penalty message
     if laserGame.is_penalized then
         love.graphics.setColor(1, 0, 0)
-        love.graphics.printf(string.format("HIT! Score Reset (%.1f)", laserGame.penalty_timer),
+        love.graphics.printf(string.format("HIT! Score Reset (%.1f)", timer.getRemaining(laserGame.penalty_timer)),
             0, base_height/2 - 30,
             base_width, "center")
     end
@@ -638,7 +631,7 @@ end
 function laserGame.penalizePlayer()
     if not laserGame.is_penalized then
         laserGame.is_penalized = true
-        laserGame.penalty_timer = laserGame.PENALTY_DURATION
+        timer.start(laserGame.penalty_timer)
         laserGame.current_round_score = 0
         laserGame.hitCount = laserGame.hitCount + 1
         
@@ -658,16 +651,16 @@ function laserGame.penalizePlayer()
             )
         end
         
-        debugConsole.addMessage("[Laser] Player hit! Score reset to 0, hits: " .. laserGame.hitCount)
+        logger.info("LaserGame", "Player hit! Score reset to 0, hits: " .. laserGame.hitCount)
     end
 end
 
 function laserGame.reset()
-    laserGame.load()  
+    laserGame.load()
 end
 
 function laserGame.setPlayerColor(color)
-    laserGame.playerColor = color
+    laserGame.baseGame:setPlayerColor(color)
 end
 
 function laserGame.keypressed(key)
