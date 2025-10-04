@@ -26,28 +26,44 @@ praiseGame.gameTime = 0
 
 -- Alternating praise/mock messages system
 praiseGame.praise_messages = {
-    "Wow! Player is absolutely DOMINATING this game!",
-    "Incredible! Player is on fire today!",
-    "Amazing! Player is crushing everyone else!",
-    "Outstanding! Player is the clear champion!",
-    "Fantastic! Player is playing like a pro!",
-    "Unbelievable! Player is unstoppable right now!",
-    "Phenomenal! Player is in the zone!"
+    "[TROPHY] Player is earning MASSIVE POINTS! This is legendary!",
+    "[GOLD] Player's score is EXPLODING! Pure domination!",
+    "[STAR] Player is racking up points like a machine!",
+    "[TARGET] Player's performance = MAXIMUM POINTS! Incredible!",
+    "[FIRE] Player is on a point-scoring rampage! Unstoppable!",
+    "[DIAMOND] Player is collecting points like treasure! Amazing!",
+    "[ROCKET] Player's score is skyrocketing! Phenomenal work!",
+    "[LIGHTNING] Player is generating points at lightning speed!",
+    "[100] Player is hitting perfect scores! Outstanding!",
+    "[PARTY] Player is celebrating with MASSIVE point gains!"
 }
 
 praiseGame.mock_messages = {
-    "Oh dear... Player needs some serious practice!",
-    "Yikes! Player might want to try a different game!",
-    "Ouch! Player is really struggling out there!",
-    "Well... Player gave it their best shot... I think?",
-    "Hmm... Player might need a tutorial or two!",
-    "Eek! Player is having a rough time!",
-    "Yowch! Player could use some help!"
+    "[SKULL] Player's points are NEGATIVE! How is that even possible?!",
+    "[CLOWN] Player is literally LOSING points! This is pathetic!",
+    "[TRASH] Player's score is GARBAGE! Absolute trash performance!",
+    "[BURN] Player is BURNING points faster than money! Disgraceful!",
+    "[DOWN] Player's score is going DOWN! You're playing backwards!",
+    "[POOP] Player's points smell worse than actual poop! Terrible!",
+    "[STOP] Player is actively HURTING their score! Stop moving!",
+    "[BROKEN] Player's points are BROKEN! Like your gaming skills!",
+    "[FAKE] Player is pretending to play! Your score is FAKE NEWS!",
+    "[FAIL] Player's performance is so bad it's INVENTING new ways to fail!",
+    "[DEAD] Player is DEAD LAST in points! Even ghosts score higher!",
+    "[SICK] Player's score makes me physically ill! Stop embarrassing yourself!",
+    "[BOOM] Player is EXPLODING their own points! Self-destruction mode!",
+    "[CLOWN] Player is a CIRCUS CLOWN! Points are the joke!",
+    "[KNIFE] Player is STABBING their score to death! Murderous gameplay!",
+    "[CURSED] Player's points are CURSED! Even voodoo dolls score better!",
+    "[VIRUS] Player's score is CONTAGIOUSLY bad! Quarantine this gameplay!",
+    "[NEGATIVE] Player is so bad at points they're INVENTING negative numbers!",
+    "[ACTING] Player is ACTING like they have points! Performance art of failure!",
+    "[HELL] Player's points died and went to hell! Even Satan scored higher!"
 }
 
 praiseGame.current_message_index = 1
 praiseGame.message_timer = 0
-praiseGame.message_duration = 4.0 -- Each message shows for 4 seconds
+praiseGame.message_duration = 5.0 -- Each message shows for 5 seconds
 praiseGame.message_display_time = 0
 praiseGame.show_message = false
 praiseGame.is_praise = true -- Start with praise
@@ -58,11 +74,8 @@ praiseGame.typewriter_speed = 0.05 -- Seconds per character
 praiseGame.is_typing = false
 praiseGame.is_deleting = false
 
--- Performance tracking
-praiseGame.movement_score = 0
+-- Movement tracking for player position
 praiseGame.last_position = {x = 0, y = 0}
-praiseGame.total_distance = 0
-praiseGame.performance_threshold = 100 -- Points needed for praise messages
 
 -- Victory/Defeat scene
 praiseGame.victory_scene = false
@@ -163,10 +176,8 @@ function praiseGame.load()
     praiseGame.scene_timer = 0
     praiseGame.is_winner = false
     
-    -- Reset performance tracking
-    praiseGame.movement_score = 0
+    -- Reset movement tracking
     praiseGame.last_position = {x = praiseGame.player.x, y = praiseGame.player.y}
-    praiseGame.total_distance = 0
     
     -- Calculate arena positioning
     praiseGame.arena_offset_x = (base_width - praiseGame.arena_size) / 2
@@ -235,10 +246,10 @@ function praiseGame.update(dt)
             praiseGame.current_message_index = 1
         end
         
-        -- Determine message type based on performance
-        praiseGame.is_praise = praiseGame.movement_score >= praiseGame.performance_threshold
+        -- Alternate between praise and insults every 5 seconds
+        praiseGame.is_praise = not praiseGame.is_praise
         
-        -- Set target text based on performance with actual player name
+        -- Set target text based on alternating state with actual player name
         local playerName = _G.localPlayer and _G.localPlayer.name or "Player"
         if praiseGame.is_praise then
             praiseGame.target_text = praiseGame.praise_messages[praiseGame.current_message_index]:gsub("Player", playerName)
@@ -321,10 +332,7 @@ function praiseGame.update(dt)
     praiseGame.player.x = praiseGame.player.x + praiseGame.player.vx * dt
     praiseGame.player.y = praiseGame.player.y + praiseGame.player.vy * dt
     
-    -- Track movement for performance scoring
-    local distance = math.sqrt((praiseGame.player.x - praiseGame.last_position.x)^2 + (praiseGame.player.y - praiseGame.last_position.y)^2)
-    praiseGame.total_distance = praiseGame.total_distance + distance
-    praiseGame.movement_score = praiseGame.total_distance * 0.1 -- Convert distance to points
+    -- Update last position for movement tracking
     praiseGame.last_position = {x = praiseGame.player.x, y = praiseGame.player.y}
     
     -- Keep player within arena bounds
