@@ -95,11 +95,12 @@ end
 
 function jumpGame.load()
     love.window.setTitle("Jump Game")
-    love.window.setMode(800, 600)
+    -- Window size is now handled by the main scaling system
 
     jumpGame.background_image = love.graphics.newImage("images/JKGame.png")
 
-    jumpGame.player.rect = { x = 100, y = 500, width = 50, height = 50 }
+    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
+    jumpGame.player.rect = { x = 100, y = BASE_HEIGHT - 130, width = 30, height = 30 }  -- Spawn on ground platform
     jumpGame.player.dy = 0
     jumpGame.player.is_jumping = false
 
@@ -160,6 +161,10 @@ function jumpGame.update(dt) -- added music reaction
         if keys("d") then
             jumpGame.player.rect.x = jumpGame.player.rect.x + jumpGame.move_speed * dt * 150
         end
+        
+        -- Keep player within base resolution bounds
+        local BASE_WIDTH = _G.BASE_WIDTH or 800
+        jumpGame.player.rect.x = math.max(0, math.min(BASE_WIDTH - jumpGame.player.rect.width, jumpGame.player.rect.x))
 
         if keys("w") and not jumpGame.has_first_jump and not jumpGame.player.is_jumping then
             jumpGame.player.dy = -jumpGame.jump_strength
@@ -180,9 +185,10 @@ function jumpGame.update(dt) -- added music reaction
         jumpGame.player.dy = jumpGame.player.dy + jumpGame.gravity * dt * 90
         jumpGame.player.rect.y = jumpGame.player.rect.y + jumpGame.player.dy * dt * 90
 
-        -- Ground collision
-        if jumpGame.player.rect.y + jumpGame.player.rect.height >= love.graphics.getHeight() then
-            jumpGame.player.rect.y = love.graphics.getHeight() - jumpGame.player.rect.height
+        -- Ground collision (use BASE_HEIGHT to prevent resize issues)
+        local GROUND_Y = _G.BASE_HEIGHT or 600
+        if jumpGame.player.rect.y + jumpGame.player.rect.height >= GROUND_Y then
+            jumpGame.player.rect.y = GROUND_Y - jumpGame.player.rect.height
             jumpGame.player.dy = 0
             jumpGame.has_first_jump = false
             jumpGame.has_second_jump = false
@@ -229,8 +235,8 @@ function jumpGame.update(dt) -- added music reaction
             jumpGame.player.is_jumping = false
         end
 
-        -- Camera follow
-        local target_camera_y = jumpGame.player.rect.y - love.graphics.getHeight() / 2
+        -- Camera follow (use BASE_HEIGHT to prevent resize issues)
+        local target_camera_y = jumpGame.player.rect.y - (_G.BASE_HEIGHT or 600) / 2
         jumpGame.camera_y = jumpGame.camera_y + (target_camera_y - jumpGame.camera_y) * jumpGame.camera_smoothness
 
         jumpGame.timer = jumpGame.timer - dt
@@ -256,26 +262,42 @@ function jumpGame.update(dt) -- added music reaction
 end
 
 function jumpGame.draw(playersTable, localPlayerId)
-    local window_width, window_height = love.graphics.getWidth(), love.graphics.getHeight()
+    -- Get current screen dimensions
+    local screen_width = love.graphics.getWidth()
+    local screen_height = love.graphics.getHeight()
+    local base_width = _G.BASE_WIDTH or 800
+    local base_height = _G.BASE_HEIGHT or 600
+    
+    -- Calculate scaling to fit base resolution on screen
+    local scale_x = screen_width / base_width
+    local scale_y = screen_height / base_height
+    local scale = math.min(scale_x, scale_y)
+    
+    -- Calculate offsets to center the game
+    local offset_x = (screen_width - base_width * scale) / 2
+    local offset_y = (screen_height - base_height * scale) / 2
+    
+    -- Apply scaling and centering
+    love.graphics.push()
+    love.graphics.translate(offset_x, offset_y)
+    love.graphics.scale(scale, scale)
+    
     local bg_width, bg_height = jumpGame.background_image:getWidth(), jumpGame.background_image:getHeight()
-
-    local scale = 1.25
-    
-    local background_x = (window_width - (bg_width * scale)) / 2
-    
+    local background_scale = 1.25
+    local background_x = (base_width - (bg_width * background_scale)) / 2
     local background_parallax = 0.5
-    local background_y = window_height - (jumpGame.camera_y * background_parallax % (bg_height * scale))
+    local background_y = base_height - (jumpGame.camera_y * background_parallax % (bg_height * background_scale))
 
     -- Draw background tiles
-    local num_tiles = math.ceil(window_height / (bg_height * scale)) + 2
+    local num_tiles = math.ceil(base_height / (bg_height * background_scale)) + 2
     for i = 0, num_tiles do
         love.graphics.draw(
             jumpGame.background_image,
             background_x,
-            background_y - (i * bg_height * scale),
+            background_y - (i * bg_height * background_scale),
             0,
-            scale,
-            scale
+            background_scale,
+            background_scale
         )
     end
 
@@ -401,6 +423,9 @@ function jumpGame.draw(playersTable, localPlayerId)
         local total_score_text = "Total Score: " .. (playersTable[localPlayerId].totalScore or 0)
         love.graphics.print(total_score_text, 10, 30)
     end
+    
+    -- Pop the scaling transform
+    love.graphics.pop()
 end
 
 function jumpGame.reset(playersTable) 
@@ -409,8 +434,9 @@ function jumpGame.reset(playersTable)
     jumpGame.score = 0
     jumpGame.timer = (musicHandler.beatInterval * 8)-- - (musicHandler.beatInterval / 2)
     jumpGame.game_over = false
+    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
     jumpGame.player.rect.x = 100
-    jumpGame.player.rect.y = 500
+    jumpGame.player.rect.y = BASE_HEIGHT - 130  -- Spawn on ground platform
     jumpGame.player.dy = 0
     jumpGame.camera_y = 0
     jumpGame.has_first_jump = false
@@ -427,21 +453,24 @@ function jumpGame.reset(playersTable)
 end
 
 function jumpGame.createPlatforms()
+    local BASE_WIDTH = _G.BASE_WIDTH or 800
+    local BASE_HEIGHT = _G.BASE_HEIGHT or 600
+    
     -- base platforms
     jumpGame.platforms = {
-        { rect = { x = 50, y = 500, width = 700, height = 20 } },
-        { rect = { x = 100, y = 400, width = 100, height = 10 } },
-        { rect = { x = 300, y = 325, width = 100, height = 10 } },
-        { rect = { x = 500, y = 250, width = 100, height = 10 } },
-        { rect = { x = 200, y = 175, width = 100, height = 10 } },
-        { rect = { x = 400, y = 100, width = 100, height = 10 } }
+        { rect = { x = 50, y = BASE_HEIGHT - 100, width = BASE_WIDTH - 100, height = 20 } },
+        { rect = { x = 100, y = BASE_HEIGHT - 200, width = 100, height = 10 } },
+        { rect = { x = 300, y = BASE_HEIGHT - 275, width = 100, height = 10 } },
+        { rect = { x = 500, y = BASE_HEIGHT - 350, width = 100, height = 10 } },
+        { rect = { x = 200, y = BASE_HEIGHT - 425, width = 100, height = 10 } },
+        { rect = { x = 400, y = BASE_HEIGHT - 500, width = 100, height = 10 } }
     }
 
     -- generate additional random platforms
-    local current_y = 100
+    local current_y = BASE_HEIGHT - 500
     local num_extra_platforms = 100
     for i = 1, num_extra_platforms do
-        local platform_x = math.random(50, 700)
+        local platform_x = math.random(50, BASE_WIDTH - 150)
         current_y = current_y - 75
         table.insert(jumpGame.platforms, { rect = { x = platform_x, y = current_y, width = 100, height = 10 } })
     end

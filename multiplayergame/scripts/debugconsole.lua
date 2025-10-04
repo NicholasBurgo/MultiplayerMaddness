@@ -8,9 +8,74 @@ debugConsole.height = 300
 debugConsole.x = 10  -- Position from left
 debugConsole.y = love.graphics.getHeight() - 310  -- Position from bottom
 
+-- Debug commands
+debugConsole.commands = {}
+debugConsole.inputText = ""
+debugConsole.inputActive = false
+
 function debugConsole.init()
     debugConsole.log = {}
     debugConsole.addMessage("[Status] Debug console initialized")
+    
+    -- Initialize debug commands
+    debugConsole.initCommands()
+end
+
+function debugConsole.initCommands()
+    -- Add debug commands
+    debugConsole.commands["setscore"] = function(playerId, score)
+        playerId = tonumber(playerId)
+        score = tonumber(score)
+        if playerId and score and _G.players and _G.players[playerId] then
+            _G.players[playerId].totalScore = score
+            debugConsole.addMessage(string.format("[Debug] Set player %d score to %d", playerId, score))
+        else
+            debugConsole.addMessage("[Debug] Invalid player ID or score")
+        end
+    end
+    
+    debugConsole.commands["addscore"] = function(playerId, amount)
+        playerId = tonumber(playerId)
+        amount = tonumber(amount)
+        if playerId and amount and _G.players and _G.players[playerId] then
+            _G.players[playerId].totalScore = (_G.players[playerId].totalScore or 0) + amount
+            debugConsole.addMessage(string.format("[Debug] Added %d to player %d score (now %d)", amount, playerId, _G.players[playerId].totalScore))
+        else
+            debugConsole.addMessage("[Debug] Invalid player ID or amount")
+        end
+    end
+    
+    -- Score lobby removed
+    
+    debugConsole.commands["help"] = function()
+        debugConsole.addMessage("[Debug] Available commands:")
+        debugConsole.addMessage("  setscore <playerId> <score> - Set player score")
+        debugConsole.addMessage("  addscore <playerId> <amount> - Add to player score")
+        debugConsole.addMessage("  testscorelobby - Test score lobby")
+        debugConsole.addMessage("  help - Show this help")
+    end
+end
+
+function debugConsole.executeCommand(input)
+    local parts = {}
+    for word in input:gmatch("%S+") do
+        table.insert(parts, word)
+    end
+    
+    if #parts == 0 then return end
+    
+    local command = parts[1]
+    local args = {}
+    for i = 2, #parts do
+        table.insert(args, parts[i])
+    end
+    
+    if debugConsole.commands[command] then
+        debugConsole.commands[command](unpack(args))
+    else
+        debugConsole.addMessage("[Debug] Unknown command: " .. command)
+        debugConsole.addMessage("[Debug] Type 'help' for available commands")
+    end
 end
 
 function debugConsole.addMessage(msg)
@@ -55,12 +120,59 @@ function debugConsole.draw()
         )
     end
     
+    -- Draw input field
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.9)
+    love.graphics.rectangle("fill", 
+        debugConsole.x + 10, 
+        debugConsole.y + 30 + #debugConsole.log * 20 + 10, 
+        debugConsole.width - 20, 
+        20
+    )
+    
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("> " .. debugConsole.inputText .. (debugConsole.inputActive and "_" or ""), 
+        debugConsole.x + 15, 
+        debugConsole.y + 35 + #debugConsole.log * 20 + 10
+    )
+    
     -- Restore original color
     love.graphics.setColor(r, g, b, a)
 end
 
 function debugConsole.toggle()
     debugConsole.visible = not debugConsole.visible
+    if debugConsole.visible then
+        debugConsole.inputActive = true
+    else
+        debugConsole.inputActive = false
+    end
+end
+
+function debugConsole.textinput(text)
+    if debugConsole.visible and debugConsole.inputActive then
+        debugConsole.inputText = debugConsole.inputText .. text
+    end
+end
+
+function debugConsole.keypressed(key)
+    if not debugConsole.visible or not debugConsole.inputActive then
+        return false
+    end
+    
+    if key == "return" or key == "kpenter" then
+        -- Execute command
+        if debugConsole.inputText ~= "" then
+            debugConsole.addMessage("> " .. debugConsole.inputText)
+            debugConsole.executeCommand(debugConsole.inputText)
+            debugConsole.inputText = ""
+        end
+        return true
+    elseif key == "backspace" then
+        debugConsole.inputText = debugConsole.inputText:sub(1, -2)
+        return true
+    end
+    
+    return false
 end
 
 -- Helper function to safely count table keys

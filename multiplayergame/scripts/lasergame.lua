@@ -12,7 +12,7 @@ laserGame.is_dead = false
 laserGame.camera_y = 0
 laserGame.playerColor = {1, 1, 1}
 laserGame.player_size = 30
-laserGame.arena_size = 600
+laserGame.arena_size = 750  -- Increased from 600 to 750 for bigger arena
 laserGame.arena_offset_x = 0
 laserGame.arena_offset_y = 0
 laserGame.points_per_second = 15
@@ -117,12 +117,14 @@ function laserGame.updateParticles(dt)
 end
 
 function laserGame.load()
-    laserGame.arena_offset_x = (love.graphics.getWidth() - laserGame.arena_size) / 2
-    laserGame.arena_offset_y = (love.graphics.getHeight() - laserGame.arena_size) / 2
+    -- Use base resolution for arena sizing
+    laserGame.arena_offset_x = 0
+    laserGame.arena_offset_y = 0
+    laserGame.arena_size = _G.BASE_WIDTH or 800  -- Use base width
 
     laserGame.player = {
-        x = laserGame.arena_size / 2,
-        y = laserGame.arena_size / 2,
+        x = (_G.BASE_WIDTH or 800) / 2,  -- Center of base screen
+        y = (_G.BASE_HEIGHT or 600) / 2,  -- Center of base screen
         radius = laserGame.player_size / 2,
         speed = 300
     }
@@ -455,23 +457,28 @@ function laserGame.update(dt)
 end
 
 function laserGame.draw(playersTable, localPlayerId)
+    local base_width = _G.BASE_WIDTH or 800
+    local base_height = _G.BASE_HEIGHT or 600
+    
     -- Set background color
     love.graphics.setColor(0.1, 0.1, 0.1)
-    love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    love.graphics.rectangle("fill", 0, 0, base_width, base_height)
     
     -- Push graphics state for arena drawing
     love.graphics.push()
     love.graphics.translate(laserGame.arena_offset_x, laserGame.arena_offset_y)
     
-    -- Draw arena boundary
+    -- Draw arena boundary (base resolution)
     love.graphics.setColor(0.3, 0.3, 0.3)
-    love.graphics.rectangle("line", 0, 0, laserGame.arena_size, laserGame.arena_size)
+    love.graphics.rectangle("line", 0, 0, base_width, base_height)
     
-    -- Draw grid lines for visual reference
+    -- Draw grid lines for visual reference (base resolution)
     love.graphics.setColor(0.2, 0.2, 0.2)
-    for i = 0, laserGame.arena_size, 50 do
-        love.graphics.line(i, 0, i, laserGame.arena_size)
-        love.graphics.line(0, i, laserGame.arena_size, i)
+    for i = 0, base_width, 50 do
+        love.graphics.line(i, 0, i, base_height)
+    end
+    for i = 0, base_height, 50 do
+        love.graphics.line(0, i, base_width, i)
     end
     
     -- Draw puddles
@@ -579,27 +586,27 @@ function laserGame.draw(playersTable, localPlayerId)
     -- Draw UI elements with integer scores
     love.graphics.setColor(1, 1, 1)
     love.graphics.printf(string.format("Time: %.1f", laserGame.timer), 
-        0, 10, love.graphics.getWidth(), "center")
+        0, 10, base_width, "center")
     
     -- Draw times hit display
     love.graphics.setColor(1, 0.5, 0)
     love.graphics.printf(string.format("Times Hit: %d", laserGame.hitCount), 
-        0, 40, love.graphics.getWidth(), "center")
+        0, 40, base_width, "center")
     
     -- If penalized, show penalty message
     if laserGame.is_penalized then
         love.graphics.setColor(1, 0, 0)
         love.graphics.printf(string.format("HIT! Score Reset (%.1f)", laserGame.penalty_timer),
-            0, love.graphics.getHeight()/2 - 30,
-            love.graphics.getWidth(), "center")
+            0, base_height/2 - 30,
+            base_width, "center")
     end
     
     if laserGame.game_over then
         love.graphics.setColor(1, 1, 1)
         love.graphics.printf(string.format("Game Over!\nTimes Hit: %d", 
             laserGame.hitCount), 
-            0, love.graphics.getHeight()/2 + 30, 
-            love.graphics.getWidth(), "center")
+            0, base_height/2 + 30, 
+            base_width, "center")
     end
 end
 
