@@ -1,6 +1,8 @@
 local laserGame = {}
-local debugConsole = require "scripts.debugconsole"
-local musicHandler = require "scripts.musichandler"
+laserGame.name = "laser"
+local debugConsole = require "src.core.debugconsole"
+local musicHandler = require "src.game.systems.musichandler"
+local gameUI = require "src.game.systems.gameui"
 
 -- Game state
 laserGame.player = {}
@@ -12,6 +14,7 @@ laserGame.is_dead = false
 laserGame.camera_y = 0
 laserGame.playerColor = {1, 1, 1}
 laserGame.player_size = 30
+laserGame.partyMode = false  -- Party mode flag
 laserGame.arena_size = 750  -- Increased from 600 to 750 for bigger arena
 laserGame.arena_offset_x = 0
 laserGame.arena_offset_y = 0
@@ -21,6 +24,8 @@ laserGame.is_penalized = false
 laserGame.penalty_timer = 0
 laserGame.PENALTY_DURATION = 1.0
 laserGame.hitCount = 0
+laserGame.hits = 0  -- Track hits instead of deaths
+laserGame.showTabScores = false  -- Tab key pressed
 
 -- seed stuff
 laserGame.seed = 0
@@ -116,7 +121,10 @@ function laserGame.updateParticles(dt)
     end
 end
 
-function laserGame.load()
+function laserGame.load(args)
+    args = args or {}
+    laserGame.partyMode = args.partyMode or false
+    
     -- Use base resolution for arena sizing
     laserGame.arena_offset_x = 0
     laserGame.arena_offset_y = 0
@@ -129,6 +137,14 @@ function laserGame.load()
         speed = 300
     }
     
+    -- Set player color and face if available
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer then
+            laserGame.setPlayerColor(localPlayer.color or {1, 1, 1})
+        end
+    end
+    
     laserGame.lasers = {}
     laserGame.particles = {}
     laserGame.puddles = {}
@@ -137,6 +153,7 @@ function laserGame.load()
     laserGame.is_dead = false
     laserGame.next_laser_time = laserGame.min_laser_interval
     laserGame.current_round_score = 0
+    laserGame.hits = 0  -- Reset hits counter for party mode
     laserGame.gameTime = 0
     
     -- Make sure globals exist and are valid with proper score preservation
@@ -161,9 +178,14 @@ function laserGame.load()
     debugConsole.addMessage(string.format("[Laser] Game loaded with player ID: %s, existing score: %d", 
         _G.localPlayer.id or "none", existingScore))
     
-    if _G.gameState == "hosting" then
+    -- Initialize with seed if provided, otherwise generate one for host
+    if args.seed then
+        laserGame.setSeed(args.seed)
+        debugConsole.addMessage("[Laser] Using provided seed: " .. args.seed)
+    elseif args.isHost then
         local seed = os.time() + love.timer.getTime() * 10000
         laserGame.setSeed(seed)
+        debugConsole.addMessage("[Laser] Host generated seed: " .. seed)
     end
 end
 
@@ -348,28 +370,31 @@ function laserGame.update(dt)
         end
     end
     
-    laserGame.timer = laserGame.timer - dt
-    if laserGame.timer <= 0 then
-        laserGame.timer = 0
-        laserGame.game_over = true
-        laserGame.puddles = {}
-        
-        -- Store hit count in players table for round win determination
-        if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-            _G.players[_G.localPlayer.id].laserHits = laserGame.hitCount
+    -- In party mode, don't handle timer (party mode manager does it)
+    if not laserGame.partyMode then
+        laserGame.timer = laserGame.timer - dt
+        if laserGame.timer <= 0 then
+                laserGame.timer = 0
+                laserGame.game_over = true
+                laserGame.puddles = {}
+                
+                -- Store hit count in players table for round win determination
+                if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
+                    _G.players[_G.localPlayer.id].laserHits = laserGame.hitCount
+                end
+                
+                -- Send hit count to server for winner determination
+                if _G.safeSend and _G.server then
+                    _G.safeSend(_G.server, string.format("laser_hits_sync,%d,%d", _G.localPlayer.id, laserGame.hitCount))
+                    debugConsole.addMessage("[Laser] Sent hit count to server: " .. laserGame.hitCount)
+                end
+                
+                if _G.returnState then
+                    _G.gameState = _G.returnState
+                end
+                return
+            end
         end
-        
-        -- Send hit count to server for winner determination
-        if _G.safeSend and _G.server then
-            _G.safeSend(_G.server, string.format("laser_hits_sync,%d,%d", _G.localPlayer.id, laserGame.hitCount))
-            debugConsole.addMessage("[Laser] Sent hit count to server: " .. laserGame.hitCount)
-        end
-        
-        if _G.returnState then
-            _G.gameState = _G.returnState
-        end
-        return
-    end
     
     -- Update game time and check for laser spawns
     laserGame.gameTime = laserGame.gameTime + dt
@@ -411,6 +436,17 @@ function laserGame.update(dt)
         math.min(laserGame.arena_size - laserGame.player.radius, laserGame.player.x))
     laserGame.player.y = math.max(laserGame.player.radius, 
         math.min(laserGame.arena_size - laserGame.player.radius, laserGame.player.y))
+    
+    -- Send player position for multiplayer sync
+    if _G.localPlayer and _G.localPlayer.id then
+        local events = require("src.core.events")
+        events.emit("player:laser_position", {
+            id = _G.localPlayer.id,
+            x = laserGame.player.x,
+            y = laserGame.player.y,
+            color = _G.localPlayer.color or laserGame.playerColor
+        })
+    end
     
     -- Update lasers
     for i = #laserGame.lasers, 1, -1 do
@@ -583,30 +619,22 @@ function laserGame.draw(playersTable, localPlayerId)
     -- Pop graphics state
     love.graphics.pop()
     
-    -- Draw UI elements with integer scores
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf(string.format("Time: %.1f", laserGame.timer), 
-        0, 10, base_width, "center")
-    
-    -- Draw times hit display
-    love.graphics.setColor(1, 0.5, 0)
-    love.graphics.printf(string.format("Times Hit: %d", laserGame.hitCount), 
-        0, 40, base_width, "center")
+    -- Draw UI with new system
+    gameUI.drawHitCounter(laserGame.hits, 10, 10)
     
     -- If penalized, show penalty message
     if laserGame.is_penalized then
-        love.graphics.setColor(1, 0, 0)
-        love.graphics.printf(string.format("HIT! Score Reset (%.1f)", laserGame.penalty_timer),
+        love.graphics.setColor(1, 0, 0, 1)
+        love.graphics.setFont(love.graphics.newFont(24))
+        love.graphics.printf("HIT!",
             0, base_height/2 - 30,
             base_width, "center")
+        love.graphics.setColor(1, 1, 1, 1)
     end
     
-    if laserGame.game_over then
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.printf(string.format("Game Over!\nTimes Hit: %d", 
-            laserGame.hitCount), 
-            0, base_height/2 + 30, 
-            base_width, "center")
+    -- Tab score overlay
+    if laserGame.showTabScores and playersTable then
+        gameUI.drawTabScores(playersTable, localPlayerId, "laser")
     end
 end
 
@@ -641,6 +669,7 @@ function laserGame.penalizePlayer()
         laserGame.penalty_timer = laserGame.PENALTY_DURATION
         laserGame.current_round_score = 0
         laserGame.hitCount = laserGame.hitCount + 1
+        laserGame.hits = laserGame.hits + 1  -- Track hits
         
         -- Play penalty sound
         if laserGame.sounds.death:isPlaying() then
@@ -671,7 +700,15 @@ function laserGame.setPlayerColor(color)
 end
 
 function laserGame.keypressed(key)
-    -- Add any key press handling here if needed
+    if key == "tab" then
+        laserGame.showTabScores = true
+    end
+end
+
+function laserGame.keyreleased(key)
+    if key == "tab" then
+        laserGame.showTabScores = false
+    end
 end
 
 function laserGame.mousepressed(x, y, button)

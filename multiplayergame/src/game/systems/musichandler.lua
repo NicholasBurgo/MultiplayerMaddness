@@ -1,5 +1,5 @@
 local musicHandler = {}
-local debugConsole = require "scripts.debugconsole"
+local debugConsole = require "src.core.debugconsole"
 
 -- BPM-related calculations
 musicHandler.bpm = 30.625

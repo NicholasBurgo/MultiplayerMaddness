@@ -1,6 +1,8 @@
 local meteorShower = {}
-local debugConsole = require "scripts.debugconsole"
-local musicHandler = require "scripts.musichandler"
+meteorShower.name = "meteorshower"
+local debugConsole = require "src.core.debugconsole"
+local musicHandler = require "src.game.systems.musichandler"
+local gameUI = require "src.game.systems.gameui"
 
 -- Sound effects
 meteorShower.sounds = {
@@ -19,6 +21,10 @@ meteorShower.screen_height = 600  -- Fixed base resolution
 meteorShower.camera_x = 0
 meteorShower.camera_y = 0
 meteorShower.death_count = 0
+meteorShower.partyMode = false  -- Party mode flag
+meteorShower.isHost = false  -- Host flag for safe zone movement
+meteorShower.hits = 0  -- Track hits
+meteorShower.showTabScores = false  -- Tab key pressed
 
 -- Seed-based synchronization (like laser game)
 meteorShower.seed = 0
@@ -137,13 +143,19 @@ meteorShower.sync_interpolation_speed = 60.0 -- How fast to interpolate to targe
 meteorShower.radius_interpolation_speed = 120.0 -- Faster interpolation for radius changes
 meteorShower.last_radius = 250 -- Track last radius for smooth transitions
 
-function meteorShower.load()
+function meteorShower.load(args)
+    args = args or {}
+    meteorShower.partyMode = args.partyMode or false
+    meteorShower.isHost = args.isHost or false
+    
     debugConsole.addMessage("[MeteorShower] Loading meteor shower game")
-    debugConsole.addMessage("[MeteorShower] Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
+    debugConsole.addMessage("[MeteorShower] Party mode status: " .. tostring(meteorShower.partyMode))
+    debugConsole.addMessage("[MeteorShower] Is host: " .. tostring(meteorShower.isHost))
     -- Reset game state
     meteorShower.game_over = false
     meteorShower.current_round_score = 0
     meteorShower.death_count = 0
+    meteorShower.hits = 0  -- Reset hits counter for party mode
     meteorShower.death_timer = 0
     meteorShower.death_shake = 0
     meteorShower.player_dropped = false
@@ -210,6 +222,14 @@ function meteorShower.load()
         invincibility_timer = 0
     }
     
+    -- Set player color if available from args
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer and localPlayer.color then
+            meteorShower.playerColor = localPlayer.color
+        end
+    end
+    
     -- Reset respawn timer
     meteorShower.respawn_timer = 0
     
@@ -217,9 +237,12 @@ function meteorShower.load()
     meteorShower.current_color_index = 1
     meteorShower.safe_zone_direction = {1, 0}
     meteorShower.direction_angle = 0
-    meteorShower.target_x = 400
-    meteorShower.target_y = 300
+    -- Initialize first target using seeded random
+    local margin = 100
+    meteorShower.target_x = meteorShower.random:random(margin, meteorShower.screen_width - margin)
+    meteorShower.target_y = meteorShower.random:random(margin, meteorShower.screen_height - margin)
     meteorShower.beat_count = 0
+    meteorShower.lastTargetIndex = -1  -- Initialize for deterministic target selection
     meteorShower.music_asteroid_color_index = 1
     meteorShower.last_sync_time = 0
     meteorShower.target_center_x = meteorShower.screen_width / 2
@@ -249,8 +272,8 @@ function meteorShower.load()
     meteorShower.center_y = meteorShower.screen_height / 2 -- 300
     meteorShower.safe_zone_radius = 250 -- Start at max radius
     
-    -- Set star direction for this round
-    meteorShower.star_direction = math.random(0, 2 * math.pi)
+    -- Set star direction for this round using seeded random
+    meteorShower.star_direction = meteorShower.random:random() * 2 * math.pi
     
     -- Create game elements
     meteorShower.createStars()
@@ -261,6 +284,16 @@ function meteorShower.load()
 
     -- Override music handler onBeat function for Meteor Shower
     musicHandler.onBeat = meteorShower.handleBeat
+
+    -- Initialize with seed if provided, otherwise generate one for host
+    if args.seed then
+        meteorShower.setSeed(args.seed)
+        debugConsole.addMessage("[MeteorShower] Using provided seed: " .. args.seed)
+    elseif args.isHost then
+        local seed = os.time() + love.timer.getTime() * 10000
+        meteorShower.setSeed(seed)
+        debugConsole.addMessage("[MeteorShower] Host generated seed: " .. seed)
+    end
 
     debugConsole.addMessage("[MeteorShower] Game loaded")
 end
@@ -413,83 +446,48 @@ function meteorShower.update(dt)
 
     if meteorShower.game_over then return end
 
-    meteorShower.timer = meteorShower.timer - dt
-    meteorShower.gameTime = meteorShower.gameTime + dt
-    
-    if meteorShower.timer <= 0 then
-        meteorShower.timer = 0
-        meteorShower.game_over = true
+    -- Only handle internal timer if not in party mode
+    if not meteorShower.partyMode then
+        meteorShower.timer = meteorShower.timer - dt
         
-        -- No elimination system - players just continue until timer runs out
-        
-        -- Party mode transition is handled by main.lua
-        return
+        if meteorShower.timer <= 0 then
+            meteorShower.timer = 0
+            meteorShower.game_over = true
+        end
     end
+    
+    meteorShower.gameTime = meteorShower.gameTime + dt
     
     -- No elimination system - game only ends when timer runs out
 
-    -- Update safe zone movement using pre-calculated targets
+    -- Update safe zone movement using pre-calculated targets (deterministic)
     if #meteorShower.safeZoneTargets > 0 and meteorShower.safeZoneTargets[1].time <= meteorShower.gameTime then
         local target = table.remove(meteorShower.safeZoneTargets, 1)
-        meteorShower.safe_zone_target_x = target.x
-        meteorShower.safe_zone_target_y = target.y
-        debugConsole.addMessage("[SafeZone] New target: " .. meteorShower.safe_zone_target_x .. "," .. meteorShower.safe_zone_target_y)
+        meteorShower.target_x = target.x
+        meteorShower.target_y = target.y
+        debugConsole.addMessage("[SafeZone] New target: " .. meteorShower.target_x .. "," .. meteorShower.target_y)
     end
     
-    -- Party mode uses same safe zone logic as standalone (no music handler dependency)
+    -- Deterministic movement towards target (same calculation for all players)
+    local base_speed = meteorShower.safe_zone_move_speed
+    local beat_speed_multiplier = 1.0 + (meteorShower.beat_count * 0.075) -- Moderate acceleration rate
+    -- Cap speed multiplier to ensure safe zone never moves faster than player (250 pixels/sec)
+    local max_multiplier = meteorShower.player.speed / base_speed -- 250/50 = 5.0
+    beat_speed_multiplier = math.min(beat_speed_multiplier, max_multiplier)
+    local move_speed = base_speed * beat_speed_multiplier * dt
+    local move_x = meteorShower.safe_zone_direction[1] * move_speed
+    local move_y = meteorShower.safe_zone_direction[2] * move_speed
     
-    -- Move safe zone - use interpolation for clients, direct movement for host
-    if _G and _G.returnState == "hosting" then
-        -- Check if we've reached the current target
-        local dx = meteorShower.target_x - meteorShower.center_x
-        local dy = meteorShower.target_y - meteorShower.center_y
-        local distance_to_target = math.sqrt(dx * dx + dy * dy)
-        
-        -- If we're close to the target, select a new one
-        if distance_to_target < meteorShower.target_reached_threshold then
-            meteorShower.selectNewTarget()
-        end
-        
-        -- Host: direct movement towards target
-        local base_speed = meteorShower.safe_zone_move_speed
-        local beat_speed_multiplier = 1.0 + (meteorShower.beat_count * 0.075) -- Moderate acceleration rate
-        -- Cap speed multiplier to ensure safe zone never moves faster than player (250 pixels/sec)
-        local max_multiplier = meteorShower.player.speed / base_speed -- 250/50 = 5.0
-        beat_speed_multiplier = math.min(beat_speed_multiplier, max_multiplier)
-        local move_speed = base_speed * beat_speed_multiplier * dt
-        local move_x = meteorShower.safe_zone_direction[1] * move_speed
-        local move_y = meteorShower.safe_zone_direction[2] * move_speed
-        
-        meteorShower.center_x = meteorShower.center_x + move_x
-        meteorShower.center_y = meteorShower.center_y + move_y
-        
-        -- Keep safe zone center within screen bounds with padding
-        local padding = meteorShower.safe_zone_radius + 50
-        meteorShower.center_x = math.max(padding, math.min(meteorShower.screen_width - padding, meteorShower.center_x))
-        meteorShower.center_y = math.max(padding, math.min(meteorShower.screen_height - padding, meteorShower.center_y))
-        
-        -- Update target positions for interpolation
-        meteorShower.target_center_x = meteorShower.center_x
-        meteorShower.target_center_y = meteorShower.center_y
-        meteorShower.target_radius = meteorShower.safe_zone_radius
-        
-        -- Track radius changes for smooth transitions
-        meteorShower.last_radius = meteorShower.safe_zone_radius
-    else
-        -- Client: interpolate towards target positions
-        local lerp_factor = meteorShower.sync_interpolation_speed * dt
-        
-        -- Interpolate center position
-        meteorShower.center_x = meteorShower.center_x + (meteorShower.target_center_x - meteorShower.center_x) * lerp_factor
-        meteorShower.center_y = meteorShower.center_y + (meteorShower.target_center_y - meteorShower.center_y) * lerp_factor
-        
-        -- Interpolate radius with faster speed for smoother growth/shrinking
-        local radius_lerp_factor = meteorShower.radius_interpolation_speed * dt
-        meteorShower.safe_zone_radius = meteorShower.safe_zone_radius + (meteorShower.target_radius - meteorShower.safe_zone_radius) * radius_lerp_factor
-        
-        -- Update last radius for smooth transitions
-        meteorShower.last_radius = meteorShower.safe_zone_radius
-    end
+    meteorShower.center_x = meteorShower.center_x + move_x
+    meteorShower.center_y = meteorShower.center_y + move_y
+    
+    -- Keep safe zone center within screen bounds with padding
+    local padding = meteorShower.safe_zone_radius + 50
+    meteorShower.center_x = math.max(padding, math.min(meteorShower.screen_width - padding, meteorShower.center_x))
+    meteorShower.center_y = math.max(padding, math.min(meteorShower.screen_height - padding, meteorShower.center_y))
+    
+    -- Track radius changes for smooth transitions
+    meteorShower.last_radius = meteorShower.safe_zone_radius
 
     -- Update random grow/shrink system
     if meteorShower.game_started then
@@ -552,6 +550,17 @@ function meteorShower.update(dt)
     meteorShower.player.x = math.max(0, math.min(meteorShower.screen_width - meteorShower.player.width, meteorShower.player.x))
     meteorShower.player.y = math.max(0, math.min(meteorShower.screen_height - meteorShower.player.height, meteorShower.player.y))
 
+    -- Send player position for multiplayer sync
+    if _G.localPlayer and _G.localPlayer.id then
+        local events = require("src.core.events")
+        events.emit("player:battle_position", {
+            id = _G.localPlayer.id,
+            x = meteorShower.player.x,
+            y = meteorShower.player.y,
+            color = _G.localPlayer.color or meteorShower.playerColor
+        })
+    end
+
     -- Update laser angle based on mouse position
     local mx, my = love.mouse.getPosition()
     meteorShower.player.laser_angle = math.atan2(my - meteorShower.player.y - meteorShower.player.height/2, 
@@ -576,6 +585,7 @@ function meteorShower.update(dt)
         if distance_from_center > radius and not meteorShower.player.is_invincible and not meteorShower.player_dropped then
             meteorShower.player_dropped = true
             meteorShower.death_count = meteorShower.death_count + 1 -- Increment death count
+            meteorShower.hits = meteorShower.hits + 1  -- Track hits
             meteorShower.death_timer = 2 -- 2 second death animation
             meteorShower.death_shake = 15 -- Shake intensity
             meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
@@ -642,7 +652,7 @@ function meteorShower.update(dt)
     
         -- Store death count in players table for round win determination (least deaths wins)
         if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-            _G.players[_G.localPlayer.id].battleDeaths = meteorShower.death_count
+            _G.players[_G.localPlayer.id].battleDeaths = meteorShower.hits  -- Use hits for consistency
             _G.players[_G.localPlayer.id].battleScore = meteorShower.current_round_score
         end
         
@@ -659,8 +669,8 @@ end
 function meteorShower.draw(playersTable, localPlayerId)
     -- Apply death shake effect
     if meteorShower.death_shake > 0 then
-        local shake_x = math.random(-meteorShower.death_shake, meteorShower.death_shake)
-        local shake_y = math.random(-meteorShower.death_shake, meteorShower.death_shake)
+        local shake_x = meteorShower.random:random(-meteorShower.death_shake, meteorShower.death_shake)
+        local shake_y = meteorShower.random:random(-meteorShower.death_shake, meteorShower.death_shake)
         love.graphics.translate(shake_x, shake_y)
     end
     
@@ -719,9 +729,8 @@ function meteorShower.draw(playersTable, localPlayerId)
     
     -- Draw local player (only if not dropped)
     if not meteorShower.player_dropped then
-        if playersTable and playersTable[localPlayerId] then
-            -- Draw invincibility effect if active
-            if meteorShower.player.is_invincible then
+        -- Draw invincibility effect if active
+        if meteorShower.player.is_invincible then
                 local invincibility_radius = 35
                 
                 -- Draw outer glow effect
@@ -752,38 +761,31 @@ function meteorShower.draw(playersTable, localPlayerId)
                 love.graphics.setLineWidth(1)
             end
             
-            -- Draw player
-            love.graphics.setColor(meteorShower.playerColor)
-            love.graphics.rectangle('fill',
+        -- Draw player
+        love.graphics.setColor(meteorShower.playerColor)
+        love.graphics.rectangle('fill',
+            meteorShower.player.x,
+            meteorShower.player.y,
+            meteorShower.player.width,
+            meteorShower.player.height
+        )
+        
+        -- Draw face
+        if playersTable and playersTable[localPlayerId] and playersTable[localPlayerId].facePoints then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(
+                playersTable[localPlayerId].facePoints,
                 meteorShower.player.x,
                 meteorShower.player.y,
-                meteorShower.player.width,
-                meteorShower.player.height
+                0,
+                meteorShower.player.width/100,
+                meteorShower.player.height/100
             )
-            
-            -- Draw face
-            if playersTable[localPlayerId].facePoints then
-                love.graphics.setColor(1, 1, 1, 1)
-                love.graphics.draw(
-                    playersTable[localPlayerId].facePoints,
-                    meteorShower.player.x,
-                    meteorShower.player.y,
-                    0,
-                    meteorShower.player.width/100,
-                    meteorShower.player.height/100
-                )
-            end
         end
     else
-        -- Draw death indicator with respawn countdown
+        -- Draw death indicator with respawn countdown (visual only, no text)
         love.graphics.setColor(1, 0, 0, 0.7)
         love.graphics.rectangle('fill', meteorShower.player.x, meteorShower.player.y, meteorShower.player.width, meteorShower.player.height)
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.printf('RESPAWNING', meteorShower.player.x - 30, meteorShower.player.y - 30, meteorShower.player.width + 60, 'center')
-        if meteorShower.respawn_timer > 0 then
-            love.graphics.printf(string.format('%.1f', meteorShower.respawn_timer), 
-                meteorShower.player.x - 20, meteorShower.player.y - 10, meteorShower.player.width + 40, 'center')
-        end
     end
     
     -- Draw UI elements
@@ -832,69 +834,17 @@ function meteorShower.drawSafeZone(playersTable)
 end
 
 function meteorShower.drawUI(playersTable, localPlayerId)
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Score: ' .. math.floor(meteorShower.current_round_score), 10, 10)
-
-    love.graphics.printf(string.format("Time: %.1f", meteorShower.timer), 
-    0, 10, 800, "center")
+    -- Draw hits counter
+    gameUI.drawHitCounter(meteorShower.hits, 10, 10)
     
-    if playersTable and playersTable[localPlayerId] then
-        love.graphics.print('Total Score: ' .. 
-            math.floor(playersTable[localPlayerId].totalScore or 0), 10, 30)
-    end
-    
-    -- Display invincibility status
+    -- Invincibility indicator
     if meteorShower.player.is_invincible then
-        love.graphics.setColor(1, 1, 0)
-        love.graphics.print('INVINCIBLE: ' .. string.format("%.1f", meteorShower.player.invincibility_timer), 10, 50)
-        love.graphics.setColor(1, 1, 1)
+        gameUI.drawInvincibility(meteorShower.player.invincibility_timer)
     end
     
-    -- Display respawn countdown if dead
-    if meteorShower.player_dropped and meteorShower.respawn_timer > 0 then
-        love.graphics.setColor(1, 0, 0)
-        love.graphics.print('RESPAWNING IN: ' .. string.format("%.1f", meteorShower.respawn_timer), 10, 70)
-        love.graphics.setColor(1, 1, 1)
-    end
-    
-    -- Show safe zone info
-    love.graphics.print('Safe Zone Radius: ' .. math.floor(meteorShower.safe_zone_radius) .. ' (Range: ' .. meteorShower.min_radius .. '-' .. meteorShower.max_radius .. ')', 10, meteorShower.screen_height - 80)
-    
-    -- Show current size change status
-    local phase_text = "READY"
-    local phase_color = {0.5, 1, 0.5}
-    local timer_value = 0
-    
-    if not meteorShower.game_started then
-        phase_text = "READY"
-        phase_color = {0.5, 1, 0.5}
-    elseif meteorShower.change_duration > 0 then
-        phase_text = "SHRINKING"
-        phase_color = {1, 0.5, 0.5}
-        timer_value = meteorShower.change_duration
-    else
-        phase_text = "STABLE"
-        phase_color = {0.7, 0.7, 0.7}
-        timer_value = meteorShower.size_change_interval - meteorShower.size_change_timer
-    end
-    
-    love.graphics.setColor(phase_color[1], phase_color[2], phase_color[3])
-    love.graphics.print('Status: ' .. phase_text, 10, meteorShower.screen_height - 60)
-    
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Next Change: ' .. string.format("%.1f", math.max(0, timer_value)), 10, meteorShower.screen_height - 40)
-    
-    -- Show respawn status more prominently
-    if meteorShower.player_dropped and meteorShower.respawn_timer > 0 then
-        love.graphics.setColor(1, 0, 0)
-        love.graphics.printf('YOU DIED! RESPAWNING IN ' .. string.format("%.1f", meteorShower.respawn_timer) .. ' SECONDS...', 
-            0, meteorShower.screen_height - 100, meteorShower.screen_width, 'center')
-        love.graphics.setColor(1, 1, 1)
-    elseif meteorShower.player.is_invincible then
-        love.graphics.setColor(1, 1, 0)
-        love.graphics.printf('INVINCIBLE - PROTECTED FROM ASTEROIDS', 
-            0, meteorShower.screen_height - 100, meteorShower.screen_width, 'center')
-        love.graphics.setColor(1, 1, 1)
+    -- Tab score overlay
+    if meteorShower.showTabScores and playersTable then
+        gameUI.drawTabScores(playersTable, localPlayerId, "meteorshower")
     end
     
     if not meteorShower.game_started then
@@ -919,13 +869,13 @@ end
 
 function meteorShower.createStars()
     meteorShower.stars = {}
-    -- Create a moving starfield with uniform direction and color
+    -- Create a moving starfield with uniform direction and color using seeded random
     for i = 1, 150 do
         table.insert(meteorShower.stars, {
-            x = math.random(0, meteorShower.screen_width),
-            y = math.random(0, meteorShower.screen_height),
-            size = math.random(1, 3),
-            speed = math.random(20, 60) -- Movement speed in pixels per second
+            x = meteorShower.random:random(0, meteorShower.screen_width),
+            y = meteorShower.random:random(0, meteorShower.screen_height),
+            size = meteorShower.random:random(1, 3),
+            speed = meteorShower.random:random(20, 60) -- Movement speed in pixels per second
             -- All stars use the global star_direction
         })
     end
@@ -1062,63 +1012,68 @@ function meteorShower.spawnAsteroidFromSpawnPoint(spawnInfo)
     local speed = spawnInfo.speed
     local size = spawnInfo.size
     
+    -- Create a local random generator for this specific asteroid to ensure determinism
+    local asteroidRng = love.math.newRandomGenerator(meteorShower.seed + math.floor(spawnInfo.time * 1000))
+    
     if side == 1 then -- Top
-        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
+        asteroid.x = asteroidRng:random(0, meteorShower.screen_width)
         asteroid.y = -50
-        asteroid.vx = meteorShower.random:random(-speed/4, speed/4)
-        asteroid.vy = meteorShower.random:random(speed/4, speed)
+        asteroid.vx = asteroidRng:random(-speed/4, speed/4)
+        asteroid.vy = asteroidRng:random(speed/4, speed)
     elseif side == 2 then -- Right
         asteroid.x = meteorShower.screen_width + 50
-        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
-        asteroid.vx = meteorShower.random:random(-speed, -speed/4)
-        asteroid.vy = meteorShower.random:random(-speed/4, speed/4)
+        asteroid.y = asteroidRng:random(0, meteorShower.screen_height)
+        asteroid.vx = asteroidRng:random(-speed, -speed/4)
+        asteroid.vy = asteroidRng:random(-speed/4, speed/4)
     elseif side == 3 then -- Bottom
-        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
+        asteroid.x = asteroidRng:random(0, meteorShower.screen_width)
         asteroid.y = meteorShower.screen_height + 50
-        asteroid.vx = meteorShower.random:random(-speed/4, speed/4)
-        asteroid.vy = meteorShower.random:random(-speed, -speed/4)
+        asteroid.vx = asteroidRng:random(-speed/4, speed/4)
+        asteroid.vy = asteroidRng:random(-speed, -speed/4)
     else -- Left
         asteroid.x = -50
-        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
-        asteroid.vx = meteorShower.random:random(speed/4, speed)
-        asteroid.vy = meteorShower.random:random(-speed/4, speed/4)
+        asteroid.y = asteroidRng:random(0, meteorShower.screen_height)
+        asteroid.vx = asteroidRng:random(speed/4, speed)
+        asteroid.vy = asteroidRng:random(-speed/4, speed/4)
     end
     
     asteroid.size = size
     asteroid.color = {0.5, 0.5, 0.5} -- Consistent gray color
     asteroid.points = {} -- Store irregular shape points
-    meteorShower.generateAsteroidShape(asteroid) -- Generate the irregular shape
+    asteroid.rotation = asteroidRng:random() * 2 * math.pi
+    asteroid.rotation_speed = asteroidRng:random(-2, 2)
+    meteorShower.generateAsteroidShapeWithRng(asteroid, asteroidRng) -- Generate the irregular shape with local RNG
     
     table.insert(meteorShower.asteroids, asteroid)
 end
 
 function meteorShower.spawnAsteroid()
     local asteroid = {}
-    local side = math.random(1, 4) -- 1=top, 2=right, 3=bottom, 4=left
+    local side = meteorShower.random:random(1, 4) -- 1=top, 2=right, 3=bottom, 4=left
     
     if side == 1 then -- Top
-        asteroid.x = math.random(0, meteorShower.screen_width)
+        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
         asteroid.y = -50
-        asteroid.vx = math.random(-meteorShower.asteroid_speed/4, meteorShower.asteroid_speed/4)
-        asteroid.vy = math.random(meteorShower.asteroid_speed/4, meteorShower.asteroid_speed)
+        asteroid.vx = meteorShower.random:random() * (meteorShower.asteroid_speed/2) - meteorShower.asteroid_speed/4
+        asteroid.vy = meteorShower.random:random() * (meteorShower.asteroid_speed*3/4) + meteorShower.asteroid_speed/4
     elseif side == 2 then -- Right
         asteroid.x = meteorShower.screen_width + 50
-        asteroid.y = math.random(0, meteorShower.screen_height)
-        asteroid.vx = math.random(-meteorShower.asteroid_speed, -meteorShower.asteroid_speed/4)
-        asteroid.vy = math.random(-meteorShower.asteroid_speed/4, meteorShower.asteroid_speed/4)
+        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
+        asteroid.vx = -(meteorShower.random:random() * (meteorShower.asteroid_speed*3/4) + meteorShower.asteroid_speed/4)
+        asteroid.vy = meteorShower.random:random() * (meteorShower.asteroid_speed/2) - meteorShower.asteroid_speed/4
     elseif side == 3 then -- Bottom
-        asteroid.x = math.random(0, meteorShower.screen_width)
+        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
         asteroid.y = meteorShower.screen_height + 50
-        asteroid.vx = math.random(-meteorShower.asteroid_speed/4, meteorShower.asteroid_speed/4)
-        asteroid.vy = math.random(-meteorShower.asteroid_speed, -meteorShower.asteroid_speed/4)
+        asteroid.vx = meteorShower.random:random() * (meteorShower.asteroid_speed/2) - meteorShower.asteroid_speed/4
+        asteroid.vy = -(meteorShower.random:random() * (meteorShower.asteroid_speed*3/4) + meteorShower.asteroid_speed/4)
     else -- Left
         asteroid.x = -50
-        asteroid.y = math.random(0, meteorShower.screen_height)
-        asteroid.vx = math.random(meteorShower.asteroid_speed/4, meteorShower.asteroid_speed)
-        asteroid.vy = math.random(-meteorShower.asteroid_speed/4, meteorShower.asteroid_speed/4)
+        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
+        asteroid.vx = meteorShower.random:random() * (meteorShower.asteroid_speed*3/4) + meteorShower.asteroid_speed/4
+        asteroid.vy = meteorShower.random:random() * (meteorShower.asteroid_speed/2) - meteorShower.asteroid_speed/4
     end
     
-    asteroid.size = math.random(25, 45)
+    asteroid.size = meteorShower.random:random(25, 45)
     asteroid.color = {0.5, 0.5, 0.5} -- Consistent gray color
     asteroid.points = {} -- Store irregular shape points
     meteorShower.generateAsteroidShape(asteroid) -- Generate the irregular shape
@@ -1132,33 +1087,40 @@ function meteorShower.spawnMusicAsteroidFromSpawnPoint(spawnInfo)
     local speed = spawnInfo.speed
     local size = spawnInfo.size
     
+    -- Create a local random generator for this specific asteroid to ensure determinism
+    local asteroidRng = love.math.newRandomGenerator(meteorShower.seed + math.floor(spawnInfo.time * 1000) + 999999)
+    
     if side == 1 then -- Top
-        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
+        asteroid.x = asteroidRng:random(0, meteorShower.screen_width)
         asteroid.y = -50
-        asteroid.vx = meteorShower.random:random(-speed/4, speed/4)
-        asteroid.vy = meteorShower.random:random(speed/4, speed)
+        asteroid.vx = asteroidRng:random(-speed/4, speed/4)
+        asteroid.vy = asteroidRng:random(speed/4, speed)
     elseif side == 2 then -- Right
         asteroid.x = meteorShower.screen_width + 50
-        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
-        asteroid.vx = meteorShower.random:random(-speed, -speed/4)
-        asteroid.vy = meteorShower.random:random(-speed/4, speed/4)
+        asteroid.y = asteroidRng:random(0, meteorShower.screen_height)
+        asteroid.vx = asteroidRng:random(-speed, -speed/4)
+        asteroid.vy = asteroidRng:random(-speed/4, speed/4)
     elseif side == 3 then -- Bottom
-        asteroid.x = meteorShower.random:random(0, meteorShower.screen_width)
+        asteroid.x = asteroidRng:random(0, meteorShower.screen_width)
         asteroid.y = meteorShower.screen_height + 50
-        asteroid.vx = meteorShower.random:random(-speed/4, speed/4)
-        asteroid.vy = meteorShower.random:random(-speed, -speed/4)
+        asteroid.vx = asteroidRng:random(-speed/4, speed/4)
+        asteroid.vy = asteroidRng:random(-speed, -speed/4)
     else -- Left
         asteroid.x = -50
-        asteroid.y = meteorShower.random:random(0, meteorShower.screen_height)
-        asteroid.vx = meteorShower.random:random(speed/4, speed)
-        asteroid.vy = meteorShower.random:random(-speed/4, speed/4)
+        asteroid.y = asteroidRng:random(0, meteorShower.screen_height)
+        asteroid.vx = asteroidRng:random(speed/4, speed)
+        asteroid.vy = asteroidRng:random(-speed/4, speed/4)
     end
     
     asteroid.size = size
-    asteroid.color = meteorShower.music_asteroid_colors[meteorShower.music_asteroid_color_index] -- Use current beat color
+    -- Use deterministic color based on spawn time instead of music beat
+    local colorIndex = (math.floor(spawnInfo.time * 2) % #meteorShower.music_asteroid_colors) + 1
+    asteroid.color = meteorShower.music_asteroid_colors[colorIndex]
     asteroid.points = {} -- Store irregular shape points
     asteroid.is_music_asteroid = true -- Mark as music asteroid
-    meteorShower.generateAsteroidShape(asteroid) -- Generate the irregular shape
+    asteroid.rotation = asteroidRng:random() * 2 * math.pi
+    asteroid.rotation_speed = asteroidRng:random(-2, 2)
+    meteorShower.generateAsteroidShapeWithRng(asteroid, asteroidRng) -- Generate the irregular shape with local RNG
     
     table.insert(meteorShower.music_asteroids, asteroid)
     debugConsole.addMessage("[MusicAsteroid] Spawned music-synced asteroid at time " .. spawnInfo.time)
@@ -1180,6 +1142,28 @@ function meteorShower.generateAsteroidShape(asteroid)
         local jitter = asteroid.size / 10
         x = x + meteorShower.random:random(-jitter, jitter)
         y = y + meteorShower.random:random(-jitter, jitter)
+        
+        table.insert(asteroid.points, x)
+        table.insert(asteroid.points, y)
+    end
+end
+
+function meteorShower.generateAsteroidShapeWithRng(asteroid, rng)
+    -- Generate irregular asteroid shape with 6-8 points using provided RNG
+    local num_points = rng:random(6, 8)
+    asteroid.points = {}
+    
+    for i = 1, num_points do
+        local angle = (i - 1) * (2 * math.pi / num_points)
+        local radius_variation = rng:random(0.7, 1.1) -- Make it irregular but not too extreme
+        local base_radius = asteroid.size / 2
+        local x = math.cos(angle) * base_radius * radius_variation
+        local y = math.sin(angle) * base_radius * radius_variation
+        
+        -- Add some deterministic jitter to make it more chaotic
+        local jitter = asteroid.size / 10
+        x = x + rng:random(-jitter, jitter)
+        y = y + rng:random(-jitter, jitter)
         
         table.insert(asteroid.points, x)
         table.insert(asteroid.points, y)
@@ -1249,6 +1233,7 @@ function meteorShower.checkAsteroidCollisions()
             if not meteorShower.player.is_invincible and not meteorShower.player_dropped then
                 meteorShower.player_dropped = true
                 meteorShower.death_count = meteorShower.death_count + 1 -- Increment death count
+                meteorShower.hits = meteorShower.hits + 1  -- Track hits
                 meteorShower.death_timer = 2 -- 2 second death animation
                 meteorShower.death_shake = 15 -- Shake intensity
                 meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
@@ -1270,6 +1255,7 @@ function meteorShower.checkAsteroidCollisions()
             if not meteorShower.player.is_invincible and not meteorShower.player_dropped then
                 meteorShower.player_dropped = true
                 meteorShower.death_count = meteorShower.death_count + 1 -- Increment death count
+                meteorShower.hits = meteorShower.hits + 1  -- Track hits
                 meteorShower.death_timer = 2 -- 2 second death animation
                 meteorShower.death_shake = 15 -- Shake intensity
                 meteorShower.respawn_timer = meteorShower.respawn_delay -- Start respawn timer
@@ -1314,6 +1300,18 @@ function meteorShower.sendGameStateSync()
                 _G.safeSend(client, message)
             end
         end
+    end
+end
+
+function meteorShower.keypressed(key)
+    if key == "tab" then
+        meteorShower.showTabScores = true
+    end
+end
+
+function meteorShower.keyreleased(key)
+    if key == "tab" then
+        meteorShower.showTabScores = false
     end
 end
 

@@ -1,6 +1,8 @@
 local dodgeGame = {}
-local debugConsole = require "scripts.debugconsole"
-local musicHandler = require "scripts.musichandler"
+dodgeGame.name = "dodge"
+local debugConsole = require "src.core.debugconsole"
+local musicHandler = require "src.game.systems.musichandler"
+local gameUI = require "src.game.systems.gameui"
 
 -- Sound effects
 dodgeGame.sounds = {
@@ -19,6 +21,9 @@ dodgeGame.screen_height = 600  -- Fixed base resolution
 dodgeGame.camera_x = 0
 dodgeGame.camera_y = 0
 dodgeGame.death_count = 0
+dodgeGame.partyMode = false  -- Party mode flag
+dodgeGame.hits = 0  -- Track hits
+dodgeGame.showTabScores = false  -- Tab key pressed
 
 -- Seed-based synchronization (like laser game)
 dodgeGame.seed = 0
@@ -59,14 +64,18 @@ dodgeGame.player_dropped = false
 
 -- Laser structure: {x, y, target_player_id, tracking_time, active_time, is_active, is_tracking, target_x, stop_tracking_time}
 
-function dodgeGame.load()
+function dodgeGame.load(args)
+    args = args or {}
+    dodgeGame.partyMode = args.partyMode or false
+    
     debugConsole.addMessage("[DodgeGame] Loading dodge laser game")
-    debugConsole.addMessage("[DodgeGame] Party mode status: " .. tostring(_G and _G.partyMode or "nil"))
+    debugConsole.addMessage("[DodgeGame] Party mode status: " .. tostring(dodgeGame.partyMode))
     
     -- Reset game state
     dodgeGame.game_over = false
     dodgeGame.current_round_score = 0
     dodgeGame.death_count = 0
+    dodgeGame.hits = 0  -- Reset hits counter for party mode
     dodgeGame.game_started = true
     dodgeGame.start_timer = 0
     dodgeGame.timer = 30 -- Reset timer to 30 seconds
@@ -93,12 +102,30 @@ function dodgeGame.load()
         invincibility_timer = 0
     }
     
+    -- Set player color if available from args
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer and localPlayer.color then
+            dodgeGame.playerColor = localPlayer.color
+        end
+    end
+    
     -- Set star direction for this round (top to bottom for space movement effect)
     dodgeGame.star_direction = math.pi / 2  -- 90 degrees (downward)
     
     -- Create game elements
     dodgeGame.createStars()
     dodgeGame.lasers = {}
+
+    -- Initialize with seed if provided, otherwise generate one for host
+    if args.seed then
+        dodgeGame.setSeed(args.seed)
+        debugConsole.addMessage("[DodgeGame] Using provided seed: " .. args.seed)
+    elseif args.isHost then
+        local seed = os.time() + love.timer.getTime() * 10000
+        dodgeGame.setSeed(seed)
+        debugConsole.addMessage("[DodgeGame] Host generated seed: " .. seed)
+    end
 
     debugConsole.addMessage("[DodgeGame] Game loaded")
 end
@@ -219,7 +246,17 @@ function dodgeGame.update(dt)
         return
     end
 
-    dodgeGame.timer = dodgeGame.timer - dt
+    -- Only handle internal timer if not in party mode
+    if not dodgeGame.partyMode then
+        dodgeGame.timer = dodgeGame.timer - dt
+        
+        if dodgeGame.timer <= 0 then
+            dodgeGame.timer = 0
+            dodgeGame.game_over = true
+            return
+        end
+    end
+    
     dodgeGame.gameTime = dodgeGame.gameTime + dt
     
     -- Handle player movement
@@ -240,6 +277,17 @@ function dodgeGame.update(dt)
     -- Keep player within screen bounds
     dodgeGame.player.x = math.max(0, math.min(dodgeGame.screen_width - dodgeGame.player.width, dodgeGame.player.x))
     dodgeGame.player.y = math.max(0, math.min(dodgeGame.screen_height - dodgeGame.player.height, dodgeGame.player.y))
+    
+    -- Send player position for multiplayer sync
+    if _G.localPlayer and _G.localPlayer.id then
+        local events = require("src.core.events")
+        events.emit("player:dodge_position", {
+            id = _G.localPlayer.id,
+            x = dodgeGame.player.x,
+            y = dodgeGame.player.y,
+            color = _G.localPlayer.color or dodgeGame.playerColor
+        })
+    end
     
     -- Handle respawning if player was hit
     if dodgeGame.player_dropped and not dodgeGame.game_over then
@@ -274,6 +322,7 @@ function dodgeGame.update(dt)
         -- Store death count in players table for round win determination (least deaths wins)
         if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
             _G.players[_G.localPlayer.id].dodgeDeaths = dodgeGame.death_count
+            _G.players[_G.localPlayer.id].dodgeHits = dodgeGame.hits  -- Track hits for scoring
             _G.players[_G.localPlayer.id].dodgeScore = dodgeGame.current_round_score
         end
         
@@ -335,9 +384,8 @@ function dodgeGame.draw(playersTable, localPlayerId)
     
     -- Draw local player (only if not eliminated or if respawning)
     if not dodgeGame.player_dropped or (dodgeGame.player_dropped and dodgeGame.respawn_timer) then
-        if playersTable and playersTable[localPlayerId] then
-            -- Draw invincibility effect if active
-            if dodgeGame.player.is_invincible then
+        -- Draw invincibility effect if active
+        if dodgeGame.player.is_invincible then
                 local invincibility_radius = 35
                 
                 -- Draw outer glow effect
@@ -368,27 +416,26 @@ function dodgeGame.draw(playersTable, localPlayerId)
                 love.graphics.setLineWidth(1)
             end
             
-            -- Draw player
-            love.graphics.setColor(dodgeGame.playerColor)
-            love.graphics.rectangle('fill',
+        -- Draw player
+        love.graphics.setColor(dodgeGame.playerColor)
+        love.graphics.rectangle('fill',
+            dodgeGame.player.x,
+            dodgeGame.player.y,
+            dodgeGame.player.width,
+            dodgeGame.player.height
+        )
+        
+        -- Draw face
+        if playersTable and playersTable[localPlayerId] and playersTable[localPlayerId].facePoints then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(
+                playersTable[localPlayerId].facePoints,
                 dodgeGame.player.x,
                 dodgeGame.player.y,
-                dodgeGame.player.width,
-                dodgeGame.player.height
+                0,
+                dodgeGame.player.width/100,
+                dodgeGame.player.height/100
             )
-            
-            -- Draw face
-            if playersTable[localPlayerId].facePoints then
-                love.graphics.setColor(1, 1, 1, 1)
-                love.graphics.draw(
-                    playersTable[localPlayerId].facePoints,
-                    dodgeGame.player.x,
-                    dodgeGame.player.y,
-                    0,
-                    dodgeGame.player.width/100,
-                    dodgeGame.player.height/100
-                )
-            end
         end
     end
     
@@ -397,15 +444,17 @@ function dodgeGame.draw(playersTable, localPlayerId)
 end
 
 function dodgeGame.drawUI(playersTable, localPlayerId)
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print('Score: ' .. math.floor(dodgeGame.current_round_score), 10, 10)
-
-    love.graphics.printf(string.format("Time: %.1f", dodgeGame.timer), 
-        0, 10, 800, "center")
+    -- Draw hits counter
+    gameUI.drawHitCounter(dodgeGame.hits, 10, 10)
     
-    if playersTable and playersTable[localPlayerId] then
-        love.graphics.print('Total Score: ' .. 
-            math.floor(playersTable[localPlayerId].totalScore or 0), 10, 30)
+    -- Invincibility indicator
+    if dodgeGame.player.is_invincible then
+        gameUI.drawInvincibility(dodgeGame.player.invincibility_timer)
+    end
+    
+    -- Tab score overlay
+    if dodgeGame.showTabScores and playersTable then
+        gameUI.drawTabScores(playersTable, localPlayerId, "dodge")
     end
     
     -- Display invincibility status
@@ -419,9 +468,6 @@ function dodgeGame.drawUI(playersTable, localPlayerId)
     
     if dodgeGame.game_over then
         love.graphics.printf('Game Over - Round Complete!', 
-            0, dodgeGame.screen_height / 2 - 50, dodgeGame.screen_width, 'center')
-    elseif dodgeGame.player_dropped and dodgeGame.respawn_timer then
-        love.graphics.printf('Respawning in ' .. math.ceil(dodgeGame.respawn_timer) .. '...', 
             0, dodgeGame.screen_height / 2 - 50, dodgeGame.screen_width, 'center')
     end
 end
@@ -613,9 +659,10 @@ function dodgeGame.checkLaserCollisions()
             -- Check collision with laser (vertical laser only)
             if dodgeGame.player.x < laser.x + dodgeGame.laser_width/2 and
                dodgeGame.player.x + dodgeGame.player.width > laser.x - dodgeGame.laser_width/2 then
-                if not dodgeGame.player.is_invincible then
+                if not dodgeGame.player.is_invincible and not dodgeGame.player_dropped then
                     dodgeGame.player_dropped = true
                     dodgeGame.death_count = dodgeGame.death_count + 1 -- Increment death count
+                    dodgeGame.hits = dodgeGame.hits + 1  -- Track hits
                     if laser.is_screen_splitter then
                         debugConsole.addMessage("[DodgeGame] Player hit by screen-splitter! Death count: " .. dodgeGame.death_count)
                     else
@@ -646,6 +693,18 @@ end
 
 function dodgeGame.setPlayerColor(color)
     dodgeGame.playerColor = color
+end
+
+function dodgeGame.keypressed(key)
+    if key == "tab" then
+        dodgeGame.showTabScores = true
+    end
+end
+
+function dodgeGame.keyreleased(key)
+    if key == "tab" then
+        dodgeGame.showTabScores = false
+    end
 end
 
 return dodgeGame

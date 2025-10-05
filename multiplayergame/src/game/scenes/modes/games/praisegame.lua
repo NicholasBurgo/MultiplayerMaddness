@@ -1,6 +1,8 @@
 local praiseGame = {}
-local debugConsole = require "scripts.debugconsole"
-local musicHandler = require "scripts.musichandler"
+praiseGame.name = "praise"
+local debugConsole = require "src.core.debugconsole"
+local musicHandler = require "src.game.systems.musichandler"
+local gameUI = require "src.game.systems.gameui"
 
 -- Game state
 praiseGame.player = {}
@@ -18,6 +20,8 @@ praiseGame.current_round_score = 0
 praiseGame.is_penalized = false
 praiseGame.penalty_timer = 0
 praiseGame.PENALTY_DURATION = 1.0
+praiseGame.partyMode = false  -- Party mode flag
+praiseGame.showTabScores = false  -- Tab key pressed
 
 -- seed stuff
 praiseGame.seed = 0
@@ -131,8 +135,12 @@ function praiseGame.updateParticles(dt)
 end
 
 -- Load the game
-function praiseGame.load()
+function praiseGame.load(args)
+    args = args or {}
+    praiseGame.partyMode = args.partyMode or false
+    
     debugConsole.addMessage("[Praise] Loading praise/belittler game")
+    debugConsole.addMessage("[Praise] Party mode status: " .. tostring(praiseGame.partyMode))
     
     -- Initialize player position (center of arena)
     local base_width = _G.BASE_WIDTH or 800
@@ -142,6 +150,14 @@ function praiseGame.load()
     praiseGame.player.y = praiseGame.arena_offset_y + praiseGame.arena_size / 2
     praiseGame.player.vx = 0
     praiseGame.player.vy = 0
+    
+    -- Set player color if available from args
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer and localPlayer.color then
+            praiseGame.playerColor = localPlayer.color
+        end
+    end
     
     -- Reset game state
     praiseGame.game_over = false
@@ -216,19 +232,21 @@ function praiseGame.update(dt)
         return 
     end
     
-    praiseGame.timer = praiseGame.timer - dt
-    if praiseGame.timer <= 0 then
-        praiseGame.timer = 0
-        
-        -- Start victory scene (don't set game_over yet - wait for scene to finish)
-        praiseGame.victory_scene = true
-        praiseGame.scene_timer = praiseGame.scene_duration
-        
-        -- Determine if player is winner (for now, just random for demo)
-        praiseGame.is_winner = praiseGame.random:random() > 0.5
-        
-        debugConsole.addMessage("[Praise] Timer expired - starting victory scene")
-        return
+    -- Only handle internal timer if not in party mode
+    if not praiseGame.partyMode then
+        praiseGame.timer = praiseGame.timer - dt
+        if praiseGame.timer <= 0 then
+            praiseGame.timer = 0
+            
+            -- Start victory scene (don't set game_over yet - wait for scene to finish)
+            praiseGame.victory_scene = true
+            praiseGame.scene_timer = praiseGame.scene_duration
+            
+            -- Determine if player is winner (for now, just random for demo)
+            praiseGame.is_winner = praiseGame.random:random() > 0.5
+            
+            debugConsole.addMessage("[Praise] Timer expired - starting victory scene")
+        end
     end
     
     -- Update game time
@@ -330,6 +348,17 @@ function praiseGame.update(dt)
     -- Update player position
     praiseGame.player.x = praiseGame.player.x + praiseGame.player.vx * dt
     praiseGame.player.y = praiseGame.player.y + praiseGame.player.vy * dt
+    
+    -- Send player position for multiplayer sync
+    if _G.localPlayer and _G.localPlayer.id then
+        local events = require("src.core.events")
+        events.emit("player:praise_position", {
+            id = _G.localPlayer.id,
+            x = praiseGame.player.x,
+            y = praiseGame.player.y,
+            color = _G.localPlayer.color or praiseGame.playerColor
+        })
+    end
     
     -- Update last position for movement tracking
     praiseGame.last_position = {x = praiseGame.player.x, y = praiseGame.player.y}
@@ -434,6 +463,19 @@ function praiseGame.draw(playersTable, localPlayerId)
         praiseGame.player_size, 
         praiseGame.player_size)
     
+    -- Draw player face if available
+    if playersTable and playersTable[localPlayerId] and playersTable[localPlayerId].facePoints then
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(
+            playersTable[localPlayerId].facePoints,
+            player_x - praiseGame.player_size / 2,
+            player_y - praiseGame.player_size / 2,
+            0,
+            praiseGame.player_size / 100,
+            praiseGame.player_size / 100
+        )
+    end
+    
     -- Draw player name above player
     if _G.localPlayer and _G.localPlayer.name then
         love.graphics.setColor(1, 1, 1)
@@ -442,6 +484,49 @@ function praiseGame.draw(playersTable, localPlayerId)
             player_x - nameWidth / 2, 
             player_y - praiseGame.player_size / 2 - 25, 
             nameWidth, "center")
+    end
+    
+    -- Draw other players (ghost-like)
+    if playersTable then
+        for id, player in pairs(playersTable) do
+            if id ~= localPlayerId and player.praiseX and player.praiseY then
+                -- Convert absolute position to arena-relative position
+                local other_player_x = player.praiseX - praiseGame.arena_offset_x
+                local other_player_y = player.praiseY - praiseGame.arena_offset_y
+                
+                -- Draw ghost player body
+                love.graphics.setColor(player.color[1], player.color[2], player.color[3], 0.5)
+                love.graphics.rectangle("fill",
+                    other_player_x - praiseGame.player_size/2,
+                    other_player_y - praiseGame.player_size/2,
+                    praiseGame.player_size,
+                    praiseGame.player_size
+                )
+                
+                -- Draw their face if available
+                if player.facePoints then
+                    love.graphics.setColor(1, 1, 1, 0.5)
+                    love.graphics.draw(
+                        player.facePoints,
+                        other_player_x - praiseGame.player_size/2,
+                        other_player_y - praiseGame.player_size/2,
+                        0,
+                        praiseGame.player_size/100,
+                        praiseGame.player_size/100
+                    )
+                end
+                
+                -- Draw player name
+                if player.name then
+                    love.graphics.setColor(1, 1, 1, 0.5)
+                    local nameWidth = love.graphics.getFont():getWidth(player.name)
+                    love.graphics.printf(player.name,
+                        other_player_x - nameWidth/2,
+                        other_player_y - praiseGame.player_size/2 - 25,
+                        nameWidth, "center")
+                end
+            end
+        end
     end
     
     -- Draw particles
@@ -453,10 +538,10 @@ function praiseGame.draw(playersTable, localPlayerId)
     
     love.graphics.pop()
     
-    -- Draw UI elements
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf(string.format("Time: %.1f", praiseGame.timer), 
-        0, 10, base_width, "center")
+    -- Tab score overlay (praise game has no scoring, just shows player list)
+    if praiseGame.showTabScores and playersTable then
+        gameUI.drawTabScores(playersTable, localPlayerId, "praise")
+    end
     
     -- Draw victory/defeat scene
     if praiseGame.victory_scene then
@@ -508,6 +593,18 @@ end
 -- Handle mouse presses
 function praiseGame.mousepressed(x, y, button)
     -- No mouse handling needed
+end
+
+function praiseGame.keypressed(key)
+    if key == "tab" then
+        praiseGame.showTabScores = true
+    end
+end
+
+function praiseGame.keyreleased(key)
+    if key == "tab" then
+        praiseGame.showTabScores = false
+    end
 end
 
 return praiseGame

@@ -1,0 +1,122 @@
+# PARTY MODE - COMPLETE UPDATE SCRIPT
+# Copy/paste these exact changes to finish the implementation
+
+## ✅ LASER GAME - DONE!
+## ✅ JUMP GAME - DONE!
+
+## METEOR SHOWER - Apply These Changes:
+
+### 1. Update load function (around line 141):
+```lua
+function meteorShower.load(args)
+    args = args or {}
+    meteorShower.partyMode = args.partyMode or false
+    
+    debugConsole.addMessage("[MeteorShower] Loading meteor shower game")
+    -- ... rest of existing load code ...
+    
+    -- Add at end of load function:
+    -- Set player color and face if available
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer then
+            meteorShower.setPlayerColor(localPlayer.color or {1, 1, 1})
+        end
+    end
+```
+
+### 2. Wrap timer logic (around line 417):
+```lua
+-- In party mode, don't handle timer (party mode manager does it)
+if not meteorShower.partyMode then
+    meteorShower.timer = meteorShower.timer - dt
+    meteorShower.gameTime = meteorShower.gameTime + dt
+    
+    if meteorShower.timer <= 0 then
+        meteorShower.timer = 0
+        meteorShower.game_over = true
+        
+        -- ... existing game over logic ...
+    end
+end
+```
+
+## DODGE GAME - Apply These Changes:
+
+### 1. Add party mode flag (top of file):
+```lua
+dodgeGame.partyMode = false  -- Party mode flag
+```
+
+### 2. Update load function:
+```lua
+function dodgeGame.load(args)
+    args = args or {}
+    dodgeGame.partyMode = args.partyMode or false
+    
+    -- ... existing load code ...
+    
+    -- Add at end:
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer then
+            dodgeGame.setPlayerColor(localPlayer.color or {1, 1, 1})
+        end
+    end
+```
+
+### 3. Wrap timer logic:
+```lua
+if not dodgeGame.partyMode then
+    dodgeGame.timer = dodgeGame.timer - dt
+    if dodgeGame.timer <= 0 then
+        -- ... existing game over logic ...
+    end
+end
+```
+
+## PRAISE GAME - Apply These Changes:
+
+### 1. Add party mode flag (top of file):
+```lua
+praiseGame.partyMode = false  -- Party mode flag
+```
+
+### 2. Update load function:
+```lua
+function praiseGame.load(args)
+    args = args or {}
+    praiseGame.partyMode = args.partyMode or false
+    
+    -- ... existing load code ...
+    
+    -- Add at end:
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer then
+            praiseGame.setPlayerColor(localPlayer.color or {1, 1, 1})
+        end
+    end
+```
+
+### 3. Wrap timer logic:
+```lua
+if not praiseGame.partyMode then
+    praiseGame.timer = praiseGame.timer - dt
+    if praiseGame.timer <= 0 then
+        -- ... existing game over logic ...
+    end
+end
+```
+
+## TESTING AFTER UPDATES:
+
+1. Launch game
+2. Host lobby
+3. Press SPACE → Select "Play" (no votes)
+4. Party mode should start!
+5. Timer at top shows 15.0 seconds
+6. After 15s, auto-transitions to next game
+7. Goes through: Jump → Laser → Meteor → Dodge → Praise → repeat
+
+## That's it! Party mode will be fully working! 🎉

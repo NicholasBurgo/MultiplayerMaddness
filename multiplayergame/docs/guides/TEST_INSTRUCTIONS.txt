@@ -1,0 +1,116 @@
+========================================
+MULTIPLAYER MADNESS - TESTING GUIDE
+========================================
+
+After the refactoring, here's how to test the game:
+
+QUICK START
+-----------
+1. Navigate to multiplayergame folder
+2. Run: love . (or use your LOVE launcher)
+3. Menu should appear
+
+BASIC TESTS
+-----------
+
+Test 1: Menu Display
+✓ Menu shows "MULTIPLAYER MADNESS"
+✓ Shows instructions: H to host, J to join, ESC to quit
+✓ No errors in console
+
+Test 2: Host Game
+✓ Press H key
+✓ Console shows: "[info][app] Host intent received"
+✓ Console shows: "[info][net.lan] Server started successfully"  
+✓ Screen switches to LOBBY
+✓ Shows "Players: 1"
+✓ Shows "Press M to start match"
+
+Test 3: Join Game (requires 2 game instances)
+✓ Launch game in first window, press H to host
+✓ Launch game in second window, press J to join
+✓ Second window connects to first
+✓ Console shows: "[info][app] Connected to server"
+✓ Second window switches to LOBBY
+✓ First window shows "Players: 2"
+
+Test 4: PING/PONG Exchange
+✓ Join game as client (test 3)
+✓ Watch console output
+✓ Should see: "[info][app] Received PING from server"
+✓ Should see: "[info][app] Received PONG from ..."
+
+Test 5: Start Match
+✓ Host game (press H)
+✓ Press M key
+✓ Screen switches to MATCH scene
+✓ Countdown appears: "Starting in: 3.0"
+✓ Countdown decreases: 2.9, 2.8, ... 0.1
+✓ Shows "GO!" when countdown complete
+
+Test 6: Disconnect
+✓ Join game from client
+✓ Close host window
+✓ Client should see: "[info][app] Disconnected from server"
+✓ Client returns to MENU
+
+EXPECTED CONSOLE OUTPUT
+-----------------------
+
+Host:
+[info][app] Initializing application
+[info][app] Switching to scene: menu
+[info][app] Host intent received
+[info][net.lan] Starting server...
+[info][net.lan] Trying port 12345
+[info][net.lan] Successfully started on port 12345
+[info][app] Switching to scene: lobby
+
+Client:
+[info][app] Initializing application  
+[info][app] Switching to scene: menu
+[info][app] Join intent received
+[info][net.lan] Starting client...
+[info][net.lan] Connecting to 127.0.0.1:12345
+[info][net.lan] Connection attempt sent
+[info][net.lan] Connected to server
+[info][app] Connected to server
+[info][app] Switching to scene: lobby
+
+KNOWN ISSUES
+------------
+- Mini-games (jump, laser, etc.) not yet integrated with new scene system
+- Player customization not accessible from new lobby
+- Music handler not integrated
+- Debug console not visible in new UI
+
+These are expected - the old mini-games are preserved but need 
+additional integration work to connect with the new architecture.
+
+TROUBLESHOOTING
+---------------
+
+Problem: "Cannot find module 'src.core.app'"
+Solution: Make sure you're running from multiplayergame/ folder
+
+Problem: Port 12345 already in use
+Solution: Close other game instances, or LAN will try ports 12346-12348
+
+Problem: Can't connect to host
+Solution: Check firewall, make sure host started successfully first
+
+Problem: No console output
+Solution: Run from command line to see output, or check Windows Terminal
+
+TRANSPORT SWITCHING
+-------------------
+
+To switch from LAN to Steam (when Steam is implemented):
+
+Edit multiplayergame/main.lua line 12:
+FROM: local transport = require("src.net.lan")
+TO:   local transport = require("src.net.steam")
+
+That's it! No other changes needed.
+
+========================================

@@ -1,6 +1,12 @@
+-- ============================================================================
+-- INSTRUCTIONS MODULE
+-- Moved from scripts/ to src/game/utils/
+-- Displays game instructions with animations synchronized to music
+-- ============================================================================
+
 local instructions = {}
-local debugConsole = require "scripts.debugconsole"
-local musicHandler = require "scripts.musichandler"
+local debugConsole = require("src.core.debugconsole")
+local musicHandler = require("src.game.systems.musichandler")
 
 -- Sprite setup
 instructions.jumpSprite = nil
@@ -8,7 +14,7 @@ instructions.laserSprite = nil
 instructions.spriteWidth = 400  -- Adjust based on your sprite size
 instructions.spriteHeight = 300 -- Adjust based on your sprite size
 instructions.currentAnim = nil
-instructions.anim8 = require "scripts.anim8"
+instructions.anim8 = require("src.game.lib.anim8")
 
 -- Animation states
 instructions.showing = false

@@ -1,0 +1,291 @@
+========================================
+MULTIPLAYER MADNESS - QUICK START GUIDE
+========================================
+
+HOW TO LAUNCH:
+--------------
+1. Open terminal/PowerShell
+2. cd to: F:\Project\MultiplayerMaddness\multiplayergame
+3. Run: love .
+
+WHAT YOU'LL SEE:
+----------------
+✓ Beautiful animated menu
+✓ "Multiplayer Madness" title pulsing with music
+✓ Menu background
+✓ Buttons that react to music beats
+
+MENU NAVIGATION:
+----------------
+Main Menu:
+  - Click "Play" → Go to Host/Join menu
+  - Click "Customize" → Character customization (coming soon)
+  - Click "Settings" → Settings (coming soon)
+  - Click "Quit" → Exit game
+
+Play Menu:
+  - Click "Host Game" → Start server, go to lobby
+  - Click "Join Game" → Connect to 127.0.0.1:12345, go to lobby
+  - Click "Back" → Return to main menu
+
+Keyboard Shortcuts:
+  - ESC → Go back / Quit
+  - H → Host (when in Play menu)
+  - J → Join (when in Play menu)
+
+LOBBY - THE FULL EXPERIENCE:
+-----------------------------
+
+Movement (WASD):
+  - W → Move up
+  - A → Move left
+  - S → Move down
+  - D → Move right
+  
+  Move around the lobby! Other players will see you move in real-time.
+
+Level Selector (TAB):
+  - Press TAB → Opens level selector grid
+  - WASD → Navigate between games
+  - SPACE → Vote for selected game
+  - ENTER → Launch game (host only)
+  - ESC/TAB → Close selector
+  
+  Vote with your friends on which game to play!
+
+Character Customization (C):
+  - Press C → Open character customization
+  - (Feature ready for integration)
+
+General:
+  - ESC → Return to menu
+
+LEVEL SELECTOR DETAILS:
+-----------------------
+When you press TAB in lobby, you'll see:
+
+  ┌──────────────────────────────────┐
+  │   [Jump]  [Laser] [Meteor]       │
+  │   Votes:2  Votes:1  Votes:0      │
+  │                                   │
+  │   [Dodge]  [Praise] [Coming]     │
+  │   Votes:0  Votes:0  Votes:0      │
+  └──────────────────────────────────┘
+
+    VOTING STATUS:
+    ● Player1 → Jump Game
+    ● Player2 → Laser Game
+
+- Green border = Currently selected
+- Numbers = How many votes each game has
+- Right panel = Who voted for what
+
+MULTIPLAYER TESTING:
+--------------------
+1. Launch game (Instance 1)
+2. Click Play → Host Game
+3. See lobby with Player 1
+
+4. Use WASD to move around!
+
+5. Press TAB to open level selector
+
+6. Launch game again (Instance 2)
+7. Click Play → Join Game
+8. Both instances show 2 players!
+
+9. Both players can:
+   - Move with WASD
+   - Press TAB to vote
+   - See each other's votes
+
+10. In Instance 1 (host):
+    - Navigate to a game
+    - Press ENTER → Both players join that game!
+
+GAME FLOW EXAMPLE:
+------------------
+Host:
+1. Host game
+2. Move around with WASD (other players see you)
+3. Press TAB (level selector opens)
+4. Use WASD to select "Jump Game"
+5. Press SPACE (vote registered)
+6. Press ENTER (game launches!)
+
+Client:
+1. Join game
+2. Move around with WASD
+3. Press TAB
+4. Vote with SPACE
+5. Wait for host to launch
+6. Game starts!
+
+CONSOLE OUTPUT:
+---------------
+You should see:
+[info][app] Initializing application
+[info][app] Registered game mode: jump
+[info][app] Registered game mode: laser
+[info][app] Registered game mode: meteorshower
+[info][app] Registered game mode: dodge
+[info][app] Registered game mode: praise
+[info][app] Switching to scene: menu
+
+When hosting:
+[info][app] Host intent received
+[info][net.lan] Starting server...
+[info][net.lan] Successfully started on port 12345
+[info][app] Switching to scene: lobby
+
+When joining:
+[info][app] Join intent received
+[info][net.lan] Connecting to 127.0.0.1:12345
+[info][net.lan] Connected to server
+[info][app] Switching to scene: lobby
+
+When starting game:
+[info][app] Start game mode: jump
+[info][app] Switching to scene: jump
+
+LOBBY CONTROLS SUMMARY:
+-----------------------
+WASD    - Move your character
+TAB     - Open/close level selector
+C       - Character customization
+ESC     - Leave lobby
+
+In Level Selector:
+WASD    - Navigate games
+SPACE   - Vote for game
+ENTER   - Launch game (host only)
+ESC/TAB - Close selector
+
+FEATURES SHOWCASE:
+------------------
+
+1. MOVEMENT SYSTEM ✨
+   - Walk around the lobby freely
+   - See other players move in real-time
+   - Smooth 200 pixels/second movement
+   - Stay within screen bounds
+
+2. VOTING SYSTEM 🗳️
+   - Democratic game selection
+   - Visual vote counters
+   - Real-time voting panel
+   - See who voted for what
+   - Host can launch any game
+
+3. ANIMATED UI 💫
+   - Pulsing borders and effects
+   - Smooth animations
+   - Music-reactive elements
+   - Professional look and feel
+
+4. MULTIPLAYER READY 🌐
+   - Host-client architecture
+   - Network-ready events
+   - Synchronized voting (local)
+   - Position tracking
+
+GAME MODES AVAILABLE:
+---------------------
+From level selector, vote and launch:
+1. Jump Game - Platform jumping
+2. Laser Game - Dodge lasers
+3. Meteor Shower - Survival
+4. Dodge Laser - Quick reflexes
+5. Praise Game - Movement
+6. Coming Soon - Future modes!
+
+TIPS & TRICKS:
+--------------
+1. Host should wait for all players before opening selector
+2. Move around to show off your character!
+3. Vote early, vote often
+4. Use WASD in selector for fast navigation
+5. Check voting panel to see consensus
+6. Host: Launch the most-voted game for democracy!
+
+TROUBLESHOOTING:
+----------------
+Problem: Can't move in lobby
+Solution: Make sure level selector is closed (press TAB if open)
+
+Problem: Can't vote
+Solution: Make sure level selector is open (press TAB)
+
+Problem: Selected game doesn't launch
+Solution: Only host can launch with ENTER
+
+Problem: No players visible
+Solution: Check if connected, verify network
+
+Problem: Level selector looks weird
+Solution: Window may be too small, try fullscreen
+
+WHAT'S NEW IN THIS VERSION:
+---------------------------
+✨ Full lobby movement with WASD
+✨ Level selector with voting system
+✨ Vote display and tracking
+✨ Character customization hooks
+✨ Animated UI elements
+✨ Real-time player positions
+✨ Network-ready architecture
+✨ Clean modular codebase
+
+ARCHITECTURE SUMMARY:
+---------------------
+main.lua (40 lines)
+  ↓
+src/core/app.lua
+  ↓
+src/game/scenes/
+  ├── menu.lua    ← Animated menu
+  ├── lobby.lua   ← Full lobby (500 lines!)
+  │   ├── WASD movement
+  │   ├── Level selector
+  │   ├── Voting system
+  │   └── Character hooks
+  ├── match.lua   ← Countdown
+  └── modes/      ← All game modes
+      ├── jump
+      ├── laser
+      ├── meteorshower
+      ├── dodge
+      └── praise
+
+DOCUMENTATION:
+--------------
+- COMPLETE_REFACTORING_SUMMARY.md (full overview)
+- GAME_MODES_INTEGRATION.md (mode integration)
+- UI_INTEGRATION_UPDATE.md (menu/lobby details)
+- LOBBY_FEATURES_UPDATE.md (voting & movement!)
+- ARCHITECTURE_DIAGRAM.txt (visual diagrams)
+- QUICK_START.txt (this file!)
+
+QUICK COMMANDS:
+---------------
+Host:
+1. love .
+2. Click Host
+3. Press TAB
+4. Vote with SPACE
+5. Launch with ENTER
+
+Join:
+1. love .
+2. Click Join
+3. Press TAB
+4. Vote with SPACE
+5. Wait for host
+
+Move:
+- Just use WASD anytime in lobby!
+
+========================================
+Ready to play! Have fun! 🎮✨
+Move around, vote together, play games!
+========================================

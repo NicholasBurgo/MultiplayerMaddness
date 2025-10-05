@@ -1,5 +1,6 @@
 local jumpGame = {}
-local musicHandler = require "scripts.musichandler"
+jumpGame.name = "jump"
+local musicHandler = require "src.game.systems.musichandler"
 
 jumpGame.player = {}
 jumpGame.platforms = {}
@@ -18,10 +19,15 @@ jumpGame.game_over = false
 jumpGame.camera_smoothness = 0.1
 jumpGame.playerColor = {1, 1, 1}  
 jumpGame.current_round_score = 0
+jumpGame.partyMode = false  -- Party mode flag
 
 jumpGame.particles = {}
 jumpGame.particleLifetime = 0.5
 jumpGame.particleCount = 10
+
+-- Seed for deterministic random generation
+jumpGame.seed = 0
+jumpGame.random = love.math.newRandomGenerator()
 
 jumpGame.sounds = {
     jump = love.audio.newSource("sounds/jumpgame-jump.mp3", "static"),
@@ -93,7 +99,15 @@ function jumpGame.updateParticles(dt)
     end
 end
 
-function jumpGame.load()
+function jumpGame.load(args)
+    args = args or {}
+    jumpGame.partyMode = args.partyMode or false
+    
+    -- Set seed for deterministic gameplay
+    jumpGame.seed = args.seed or os.time()
+    jumpGame.random:setSeed(jumpGame.seed)
+    print("[JumpGame] Using seed: " .. tostring(jumpGame.seed))
+    
     love.window.setTitle("Jump Game")
     -- Window size is now handled by the main scaling system
 
@@ -103,6 +117,14 @@ function jumpGame.load()
     jumpGame.player.rect = { x = 100, y = BASE_HEIGHT - 130, width = 30, height = 30 }  -- Spawn on ground platform
     jumpGame.player.dy = 0
     jumpGame.player.is_jumping = false
+    
+    -- Set player color and face if available
+    if args.players and args.localPlayerId ~= nil then
+        local localPlayer = args.players[args.localPlayerId]
+        if localPlayer then
+            jumpGame.setPlayerColor(localPlayer.color or {1, 1, 1})
+        end
+    end
 
     jumpGame.createPlatforms()
     
@@ -224,6 +246,17 @@ function jumpGame.update(dt) -- added music reaction
             end
         end
 
+        -- Sync player position to network
+        if _G.localPlayer and _G.localPlayer.id then
+            local events = require("src.core.events")
+            events.emit("player:jump_position", {
+                id = _G.localPlayer.id,
+                x = jumpGame.player.rect.x,
+                y = jumpGame.player.rect.y,
+                color = _G.localPlayer.color or jumpGame.playerColor
+            })
+        end
+        
         -- Update score based on upward movement
         if jumpGame.player.dy < 0 then  -- Only count upward movement
             jumpGame.current_round_score = jumpGame.current_round_score + math.floor(-jumpGame.player.dy * dt * 20)
@@ -239,48 +272,33 @@ function jumpGame.update(dt) -- added music reaction
         local target_camera_y = jumpGame.player.rect.y - (_G.BASE_HEIGHT or 600) / 2
         jumpGame.camera_y = jumpGame.camera_y + (target_camera_y - jumpGame.camera_y) * jumpGame.camera_smoothness
 
-        jumpGame.timer = jumpGame.timer - dt
-        if jumpGame.timer <= 0 then
-            jumpGame.timer = 0
-            jumpGame.game_over = true
+        -- In party mode, don't handle timer (party mode manager does it)
+        if not jumpGame.partyMode then
+            jumpGame.timer = jumpGame.timer - dt
+            if jumpGame.timer <= 0 then
+                jumpGame.timer = 0
+                jumpGame.game_over = true
 
-            -- Store score in players table for round win determination
-            if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
-                _G.players[_G.localPlayer.id].jumpScore = jumpGame.current_round_score
+                -- Store score in players table for round win determination
+                if _G.localPlayer and _G.localPlayer.id and _G.players and _G.players[_G.localPlayer.id] then
+                    _G.players[_G.localPlayer.id].jumpScore = jumpGame.current_round_score
+                end
+                
+                -- Send score to server for winner determination
+                if _G.safeSend and _G.server then
+                    _G.safeSend(_G.server, string.format("jump_score_sync,%d,%d", _G.localPlayer.id, jumpGame.current_round_score))
+                    debugConsole.addMessage("[Jump] Sent score to server: " .. jumpGame.current_round_score)
+                end
+                
+                _G.gameState = returnState
             end
-            
-            -- Send score to server for winner determination
-            if _G.safeSend and _G.server then
-                _G.safeSend(_G.server, string.format("jump_score_sync,%d,%d", _G.localPlayer.id, jumpGame.current_round_score))
-                debugConsole.addMessage("[Jump] Sent score to server: " .. jumpGame.current_round_score)
-            end
-            
-            _G.gameState = returnState
-
         end
     end
 end
 
 function jumpGame.draw(playersTable, localPlayerId)
-    -- Get current screen dimensions
-    local screen_width = love.graphics.getWidth()
-    local screen_height = love.graphics.getHeight()
     local base_width = _G.BASE_WIDTH or 800
     local base_height = _G.BASE_HEIGHT or 600
-    
-    -- Calculate scaling to fit base resolution on screen
-    local scale_x = screen_width / base_width
-    local scale_y = screen_height / base_height
-    local scale = math.min(scale_x, scale_y)
-    
-    -- Calculate offsets to center the game
-    local offset_x = (screen_width - base_width * scale) / 2
-    local offset_y = (screen_height - base_height * scale) / 2
-    
-    -- Apply scaling and centering
-    love.graphics.push()
-    love.graphics.translate(offset_x, offset_y)
-    love.graphics.scale(scale, scale)
     
     local bg_width, bg_height = jumpGame.background_image:getWidth(), jumpGame.background_image:getHeight()
     local background_scale = 1.25
@@ -423,9 +441,6 @@ function jumpGame.draw(playersTable, localPlayerId)
         local total_score_text = "Total Score: " .. (playersTable[localPlayerId].totalScore or 0)
         love.graphics.print(total_score_text, 10, 30)
     end
-    
-    -- Pop the scaling transform
-    love.graphics.pop()
 end
 
 function jumpGame.reset(playersTable) 
@@ -466,11 +481,11 @@ function jumpGame.createPlatforms()
         { rect = { x = 400, y = BASE_HEIGHT - 500, width = 100, height = 10 } }
     }
 
-    -- generate additional random platforms
+    -- generate additional random platforms using seeded random
     local current_y = BASE_HEIGHT - 500
     local num_extra_platforms = 100
     for i = 1, num_extra_platforms do
-        local platform_x = math.random(50, BASE_WIDTH - 150)
+        local platform_x = jumpGame.random:random(50, BASE_WIDTH - 150)
         current_y = current_y - 75
         table.insert(jumpGame.platforms, { rect = { x = platform_x, y = current_y, width = 100, height = 10 } })
     end
