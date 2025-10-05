@@ -206,8 +206,8 @@ function praiseGame.update(dt)
         praiseGame.scene_timer = praiseGame.scene_timer - dt
         if praiseGame.scene_timer <= 0 then
             praiseGame.victory_scene = false
-            -- Let main loop handle state transition
-            debugConsole.addMessage("[Praise] Victory scene ended - letting main loop handle state transition")
+            praiseGame.game_over = true
+            debugConsole.addMessage("[Praise] Victory scene ended - setting game_over flag")
         end
         return
     end
@@ -219,16 +219,15 @@ function praiseGame.update(dt)
     praiseGame.timer = praiseGame.timer - dt
     if praiseGame.timer <= 0 then
         praiseGame.timer = 0
-        praiseGame.game_over = true
         
-        -- Start victory scene (no scoring)
+        -- Start victory scene (don't set game_over yet - wait for scene to finish)
         praiseGame.victory_scene = true
         praiseGame.scene_timer = praiseGame.scene_duration
         
         -- Determine if player is winner (for now, just random for demo)
         praiseGame.is_winner = praiseGame.random:random() > 0.5
         
-        debugConsole.addMessage("[Praise] Game over - starting victory scene")
+        debugConsole.addMessage("[Praise] Timer expired - starting victory scene")
         return
     end
     
