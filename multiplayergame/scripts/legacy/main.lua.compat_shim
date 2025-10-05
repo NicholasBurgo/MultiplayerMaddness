@@ -1,0 +1,39 @@
+-- ============================================================================
+-- MULTIPLAYER MADNESS - COMPATIBILITY SHIM
+-- ============================================================================
+-- This file used to be the main game file (6k+ lines)
+-- It has been refactored into modular components in multiplayergame/src/
+--
+-- This file is kept for backwards compatibility as the original main.lua
+-- requires "scripts.main", but now we just load the modules and preserve
+-- any game modules that are still needed.
+-- ============================================================================
+
+-- The game now bootstraps from multiplayergame/main.lua directly
+-- If you're seeing this, the refactoring was successful!
+
+-- Keep these module requires as other parts of the codebase may still use them
+local enet = require "enet"
+local anim8 = require "scripts.anim8"
+local jumpGame = require "scripts.jumpgame"
+local laserGame = require "scripts.lasergame"
+local meteorShower = require "scripts.meteorshower"
+local dodgeGame = require "scripts.dodgegame"
+local praiseGame = require "scripts.praisegame"
+local characterCustomization = require "scripts.charactercustom"
+local debugConsole = require "scripts.debugconsole"
+local musicHandler = require "scripts.musichandler"
+local instructions = require "src.game.utils.instructions"
+local savefile = require "scripts.savefile"
+
+-- Export commonly used modules to global scope if needed by mini-games
+_G.debugConsole = debugConsole
+_G.musicHandler = musicHandler
+_G.characterCustomization = characterCustomization
+
+-- Note: All game state, networking, and scene management is now handled by:
+-- - multiplayergame/src/core/app.lua (main dispatcher)
+-- - multiplayergame/src/net/lan.lua (networking)
+-- - multiplayergame/src/game/scenes/*.lua (menu, lobby, match scenes)
+-- 
+-- The old 6k+ line file has been archived to scripts/main.lua.backup
