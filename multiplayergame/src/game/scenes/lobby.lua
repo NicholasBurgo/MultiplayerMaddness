@@ -45,8 +45,17 @@ local levelSelector = {
             {name = "Laser Game", description = "Dodge laser beams", image = "images/lasersintro.png"},
             {name = "Meteor Shower", description = "Survive the meteor shower", image = "images/menu-background.jpg"},
             {name = "Dodge Laser", description = "Quick reflex dodging", image = "images/menu-background.jpg"},
-            {name = "Praise Game", description = "Simple movement challenge", image = "images/menu-background.jpg"},
-            {name = "Coming Soon", description = "New game mode in development", image = "images/menu-background.jpg"}
+            {name = "Color Storm", description = "Dodge the color chaos!", image = "images/menu-background.jpg"},
+            {name = "Particle Collector", description = "Collect particles, avoid bad ones!", image = "images/menu-background.jpg"}
+        },
+        -- Page 2: Coming soon games
+        {
+            {name = "Coming Soon", description = "Epic battle royale mode", image = "images/menu-background.jpg", comingSoon = true},
+            {name = "Coming Soon", description = "Time-based survival challenge", image = "images/menu-background.jpg", comingSoon = true},
+            {name = "Coming Soon", description = "Cooperative puzzle solving", image = "images/menu-background.jpg", comingSoon = true},
+            {name = "Coming Soon", description = "Speed racing competition", image = "images/menu-background.jpg", comingSoon = true},
+            {name = "Coming Soon", description = "Team-based strategy game", image = "images/menu-background.jpg", comingSoon = true},
+            {name = "Praise Game", description = "Simple movement challenge", image = "images/menu-background.jpg"}
         }
     },
     animationTime = 0,
@@ -527,12 +536,18 @@ local function drawLevelSelector()
     love.graphics.setColor(0.8, 1, 0.8, 1)
     love.graphics.setFont(fonts.medium)
     if isHost then
-        love.graphics.printf("Use WASD or mouse to navigate, SPACE/CLICK to vote/launch, ESC to close", 
+        love.graphics.printf("Use WASD or mouse to navigate, SPACE/CLICK to vote/launch, Q/E to switch pages, ESC to close", 
             0, 120, BASE_WIDTH, "center")
     else
-        love.graphics.printf("Use WASD or mouse to navigate, SPACE/CLICK to vote, ESC to close", 
+        love.graphics.printf("Use WASD or mouse to navigate, SPACE/CLICK to vote, Q/E to switch pages, ESC to close", 
             0, 120, BASE_WIDTH, "center")
     end
+    
+    -- Page indicator
+    love.graphics.setFont(fonts.small)
+    love.graphics.setColor(0.7, 0.7, 0.7, 1)
+    love.graphics.printf("Page " .. levelSelector.currentPage .. " of " .. #levelSelector.pages, 
+        0, 140, BASE_WIDTH, "center")
     
     -- Calculate grid positioning
     local totalGridWidth = levelSelector.gridCols * levelSelector.cardWidth + 
@@ -552,15 +567,19 @@ local function drawLevelSelector()
         local hasVotes = levelSelector.votes[i] and #levelSelector.votes[i] > 0
         
         -- Card shadow
-        if not (level.name == "Coming Soon") then
-            love.graphics.setColor(0, 0, 0, 0.6)
-            love.graphics.rectangle('fill', x + 4, y + 4, levelSelector.cardWidth, levelSelector.cardHeight, 8, 8)
-        end
+        love.graphics.setColor(0, 0, 0, 0.6)
+        love.graphics.rectangle('fill', x + 4, y + 4, levelSelector.cardWidth, levelSelector.cardHeight, 8, 8)
         
         -- Card background with gradient effect
-        if level.name == "Coming Soon" then
-            love.graphics.setColor(0.2, 0.2, 0.2, 0.5)
+        if level.comingSoon then
+            -- Coming Soon styling - grayed out with special effect
+            local grayPulse = math.sin(levelSelector.animationTime * 2 + i) * 0.1 + 0.3
+            love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
             love.graphics.rectangle('fill', x, y, levelSelector.cardWidth, levelSelector.cardHeight, 8, 8)
+            
+            -- Coming Soon overlay
+            love.graphics.setColor(0.3, 0.3, 0.3, 0.6)
+            love.graphics.rectangle('fill', x + 5, y + 5, levelSelector.cardWidth - 10, levelSelector.cardHeight - 10, 6, 6)
         elseif isSelected then
             local bgPulse = math.sin(levelSelector.animationTime * 4 + i) * 0.15 + 0.85
             local colorShift = math.sin(levelSelector.animationTime * 2 + i * 0.5) * 0.15
@@ -583,11 +602,7 @@ local function drawLevelSelector()
         end
         
         -- Card border
-        if level.name == "Coming Soon" then
-            love.graphics.setColor(0.5, 0.5, 0.5, 0.8)
-            love.graphics.setLineWidth(2)
-            love.graphics.rectangle('line', x, y, levelSelector.cardWidth, levelSelector.cardHeight, 8, 8)
-        elseif isSelected then
+        if isSelected then
             local bgPulse = math.sin(levelSelector.animationTime * 4 + i) * 0.15 + 0.85
             love.graphics.setColor(0.2, 1, 0.6, bgPulse)
             love.graphics.setLineWidth(4)
@@ -628,7 +643,7 @@ local function drawLevelSelector()
         
         -- Level name
         love.graphics.setFont(fonts.medium)
-        if level.name == "Coming Soon" then
+        if level.comingSoon then
             love.graphics.setColor(0.5, 0.5, 0.5, 1)
         elseif isSelected then
             love.graphics.setColor(0, 1, 0, 1)
@@ -639,12 +654,20 @@ local function drawLevelSelector()
         
         -- Level description
         love.graphics.setFont(fonts.small)
-        if level.name == "Coming Soon" then
+        if level.comingSoon then
             love.graphics.setColor(0.4, 0.4, 0.4, 1)
         else
             love.graphics.setColor(0.7, 0.8, 0.7, 1)
         end
         love.graphics.printf(level.description, x + 8, y + 95, levelSelector.cardWidth - 16, "center")
+        
+        -- Coming Soon badge
+        if level.comingSoon then
+            love.graphics.setFont(fonts.small)
+            local comingSoonPulse = math.sin(levelSelector.animationTime * 3) * 0.3 + 0.7
+            love.graphics.setColor(1, 0.5, 0, comingSoonPulse)
+            love.graphics.printf("COMING SOON", x + 8, y + 110, levelSelector.cardWidth - 16, "center")
+        end
         
         -- Show character icons with enhanced styling in top-right corner
         if levelSelector.votes[i] and #levelSelector.votes[i] > 0 then
@@ -859,7 +882,7 @@ function lobby.keypressed(k)
         elseif k == "space" then
             -- SPACE to vote for selected level
             local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
-            if selectedLevel and selectedLevel.name ~= "Coming Soon" then
+            if selectedLevel and not selectedLevel.comingSoon then
                 -- Remove previous vote
                 if levelSelector.playerVotes[localPlayer.id] then
                     local oldVote = levelSelector.playerVotes[localPlayer.id]
@@ -918,13 +941,25 @@ function lobby.keypressed(k)
                 -- TODO: Send vote to server
                 -- events.emit("vote:cast", {level = levelSelector.selectedLevel})
             end
+        elseif k == "q" then
+            -- Previous page
+            if levelSelector.currentPage > 1 then
+                levelSelector.currentPage = levelSelector.currentPage - 1
+                levelSelector.selectedLevel = 1
+            end
+        elseif k == "e" then
+            -- Next page
+            if levelSelector.currentPage < #levelSelector.pages then
+                levelSelector.currentPage = levelSelector.currentPage + 1
+                levelSelector.selectedLevel = 1
+            end
         elseif k == "return" and isHost then
             -- Launch selected game
             local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
-            if selectedLevel and selectedLevel.name ~= "Coming Soon" then
-                local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
+            if selectedLevel and not selectedLevel.comingSoon then
+                local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "particlecollector", "praise"}
                 local modeIndex = levelSelector.selectedLevel
-                if modeIndex >= 1 and modeIndex <= 5 then
+                if modeIndex >= 1 and modeIndex <= 6 then
                     levelSelector.active = false
                     gameModeSelection.active = false
                     events.emit("intent:start_game", {mode = gameModes[modeIndex]})
@@ -1035,8 +1070,8 @@ function lobby.keypressed(k)
                         local selectedGame = weightedGames[randomIndex]
                         
                         -- Launch the selected game
-                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
-                        if selectedGame >= 1 and selectedGame <= 5 then
+                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "praise"}
+                        if selectedGame >= 1 and selectedGame <= 6 then
                             events.emit("intent:start_game", {mode = gameModes[selectedGame]})
                         end
                     else
@@ -1048,10 +1083,10 @@ function lobby.keypressed(k)
                 -- Play Now - host's selected level (host only)
                 if isHost then
                     local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
-                    if selectedLevel and selectedLevel.name ~= "Coming Soon" then
-                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
+                    if selectedLevel then
+                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "praise"}
                         local modeIndex = levelSelector.selectedLevel
-                        if modeIndex >= 1 and modeIndex <= 5 then
+                        if modeIndex >= 1 and modeIndex <= 6 then
                             gameModeSelection.active = false
                             events.emit("intent:start_game", {mode = gameModes[modeIndex]})
                         end
@@ -1106,56 +1141,56 @@ function lobby.mousepressed(x, y, button)
             if isMouseOverButton(x, y, cardX, cardY, levelSelector.cardWidth, levelSelector.cardHeight) then
                 levelSelector.selectedLevel = i
                 
-                -- Vote for this level if it's not "Coming Soon"
-                if level.name ~= "Coming Soon" then
-                    -- Remove previous vote
-                    if levelSelector.playerVotes[localPlayer.id] then
-                        local oldVote = levelSelector.playerVotes[localPlayer.id]
-                        if levelSelector.votes[oldVote] then
-                            for j, pid in ipairs(levelSelector.votes[oldVote]) do
-                                if pid == localPlayer.id then
-                                    table.remove(levelSelector.votes[oldVote], j)
-                                    break
-                                end
+                -- Vote for this level (only if not coming soon)
+                if not level.comingSoon then
+                -- Remove previous vote
+                if levelSelector.playerVotes[localPlayer.id] then
+                    local oldVote = levelSelector.playerVotes[localPlayer.id]
+                    if levelSelector.votes[oldVote] then
+                        for j, pid in ipairs(levelSelector.votes[oldVote]) do
+                            if pid == localPlayer.id then
+                                table.remove(levelSelector.votes[oldVote], j)
+                                break
                             end
                         end
                     end
-                    
-                    -- Remove party mode vote if exists
-                    for j, pid in ipairs(levelSelector.partyModeVotes) do
-                        if pid == localPlayer.id then
-                            table.remove(levelSelector.partyModeVotes, j)
-                            break
-                        end
-                    end
-                    
-                    -- Add new vote
-                    levelSelector.playerVotes[localPlayer.id] = i
-                    if not levelSelector.votes[i] then
-                        levelSelector.votes[i] = {}
-                    end
-                    table.insert(levelSelector.votes[i], localPlayer.id)
-                    
-                    -- Create vote particles
-                    for j = 1, 15 do
-                        createVoteParticle(
-                            cardX + levelSelector.cardWidth / 2, 
-                            cardY + levelSelector.cardHeight / 2,
-                            localPlayer.color or {1, 1, 0}
-                        )
-                    end
-                    
-                    -- If host double-clicks (or Enter key), launch the game
-                    if isHost then
-                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
-                        local modeIndex = i
-                        if modeIndex >= 1 and modeIndex <= 5 then
-                            levelSelector.active = false
-                            gameModeSelection.active = false
-                            events.emit("intent:start_game", {mode = gameModes[modeIndex]})
-                        end
+                end
+                
+                -- Remove party mode vote if exists
+                for j, pid in ipairs(levelSelector.partyModeVotes) do
+                    if pid == localPlayer.id then
+                        table.remove(levelSelector.partyModeVotes, j)
+                        break
                     end
                 end
+                
+                -- Add new vote
+                levelSelector.playerVotes[localPlayer.id] = i
+                if not levelSelector.votes[i] then
+                    levelSelector.votes[i] = {}
+                end
+                table.insert(levelSelector.votes[i], localPlayer.id)
+                
+                -- Create vote particles
+                for j = 1, 15 do
+                    createVoteParticle(
+                        cardX + levelSelector.cardWidth / 2, 
+                        cardY + levelSelector.cardHeight / 2,
+                        localPlayer.color or {1, 1, 0}
+                    )
+                end
+                
+                -- If host double-clicks (or Enter key), launch the game
+                if isHost then
+                    local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "particlecollector", "praise"}
+                    local modeIndex = i
+                    if modeIndex >= 1 and modeIndex <= 6 then
+                        levelSelector.active = false
+                        gameModeSelection.active = false
+                        events.emit("intent:start_game", {mode = gameModes[modeIndex]})
+                    end
+                end
+                end -- Close the "if not level.comingSoon then" check
                 return true
             end
         end
@@ -1253,8 +1288,8 @@ function lobby.mousepressed(x, y, button)
                         
                         local randomIndex = math.random(1, #weightedGames)
                         local selectedGame = weightedGames[randomIndex]
-                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
-                        if selectedGame >= 1 and selectedGame <= 5 then
+                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "praise"}
+                        if selectedGame >= 1 and selectedGame <= 6 then
                             events.emit("intent:start_game", {mode = gameModes[selectedGame]})
                         end
                     else
@@ -1263,10 +1298,10 @@ function lobby.mousepressed(x, y, button)
                 elseif i == 4 and isHost then
                     -- Play Now - host's selected level
                     local selectedLevel = levelSelector.pages[levelSelector.currentPage][levelSelector.selectedLevel]
-                    if selectedLevel and selectedLevel.name ~= "Coming Soon" then
-                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "praise"}
+                    if selectedLevel and not selectedLevel.comingSoon then
+                        local gameModes = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "particlecollector", "praise"}
                         local modeIndex = levelSelector.selectedLevel
-                        if modeIndex >= 1 and modeIndex <= 5 then
+                        if modeIndex >= 1 and modeIndex <= 6 then
                             gameModeSelection.active = false
                             events.emit("intent:start_game", {mode = gameModes[modeIndex]})
                         end

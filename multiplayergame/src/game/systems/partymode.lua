@@ -12,7 +12,7 @@ local party = {}
 -- Party mode state
 party.active = false
 party.currentGameIndex = 1
-party.gameLineup = {"jump", "laser", "meteorshower", "dodge", "praise"}
+party.gameLineup = {"jump", "laser", "meteorshower", "dodge", "colorstorm", "particlecollector", "praise"}
 party.roundTime = 15  -- 15 seconds per game
 party.timeRemaining = 15
 party.totalGamesPlayed = 0
@@ -99,6 +99,28 @@ function party.calculateRoundWinner()
             end
         end
         logger.info("party", "Jump game winner: Player " .. tostring(winnerId) .. " with height " .. tostring(winnerScore))
+        
+    elseif currentGame == "colorstorm" then
+        -- Color Storm: highest score wins
+        for id, player in pairs(players) do
+            local score = player.colorStormScore or 0
+            if not winnerScore or score > winnerScore then
+                winnerScore = score
+                winnerId = id
+            end
+        end
+        logger.info("party", "Color Storm winner: Player " .. tostring(winnerId) .. " with score " .. tostring(winnerScore))
+        
+    elseif currentGame == "particlecollector" then
+        -- Particle Collector: highest score wins
+        for id, player in pairs(players) do
+            local score = player.particleCollectorScore or 0
+            if not winnerScore or score > winnerScore then
+                winnerScore = score
+                winnerId = id
+            end
+        end
+        logger.info("party", "Particle Collector winner: Player " .. tostring(winnerId) .. " with score " .. tostring(winnerScore))
         
     elseif currentGame == "praise" then
         -- Praise game: no winner (user specified "nothing")

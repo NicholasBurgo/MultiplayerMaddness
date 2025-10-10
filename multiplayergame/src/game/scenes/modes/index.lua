@@ -12,6 +12,8 @@ modes.jump = require("src.game.scenes.modes.games.jumpgame")
 modes.laser = require("src.game.scenes.modes.games.lasergame")
 modes.meteorshower = require("src.game.scenes.modes.games.meteorshower")
 modes.dodge = require("src.game.scenes.modes.games.dodgegame")
+modes.colorstorm = require("src.game.scenes.modes.games.colorstorm")
+modes.particlecollector = require("src.game.scenes.modes.games.particlecollector")
 modes.praise = require("src.game.scenes.modes.games.praisegame")
 
 -- Legacy modes (may need additional integration work)
